@@ -12,6 +12,11 @@ import json
 import uuid
 import glob
 
+# TODO: look at Tern_for_sublime's functional-style implementation.
+# Logging is a bit complicated for what it does
+# Is reloading logic needed (does the trigger even work?)
+# Keep commands / listener(s) short (seperate files?) and hook them up via functions.
+
 #############################
 # Plugin development utils
 #############################
@@ -149,7 +154,7 @@ def type_info_for_sel(view,types):
         (from_line_, from_col_) = view.rowcol(region.begin())
         (to_line_, to_col_) = view.rowcol(region.end())
         [type_string, type_span] = filter_enclosing(
-            from_col_+1, to_col_+1,
+            from_col_+1, to_col_+1,in
             from_line_+1, to_line_+1,
             types)[0]
         result = (type_string, type_span)
