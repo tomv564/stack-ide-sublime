@@ -1,4 +1,8 @@
-import sublime, sublime_plugin
+try:
+    import sublime, sublime_plugin
+except Exception, e:
+    import mocks.sublime as sublime
+    import mocks.sublime_plugin as sublime_plugin
 import subprocess, os
 import sys
 import threading
@@ -1089,7 +1093,7 @@ class Log:
 
       if verb <= Log.verbosity:
           for line in ''.join(map(lambda x: str(x), msg)).split('\n'):
-              print('[SublimeStackIDE]['+cls._show_verbosity(verb)+']:',*msg)
+              print('[SublimeStackIDE]['+cls._show_verbosity(verb)+']:', msg)
 
           if verb == Log.VERB_ERROR:
               sublime.status_message('There were errors, check the console log')
