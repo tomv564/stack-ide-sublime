@@ -1,18 +1,19 @@
 try:
-    import sublime, sublime_plugin
-except Exception, e:
+    import sublime
+    import sublime_plugin
+except Exception:
     import mocks.sublime as sublime
     import mocks.sublime_plugin as sublime_plugin
-import subprocess, os
+import subprocess
+import os
 import sys
 import threading
-import time
 import traceback
 import json
 import uuid
 import glob
 
-# TODO: look at Tern_for_sublime's functional-style implementation.
+# TODO: look at Tern_for_sublime's implementation.
 # Logging is a bit complicated for what it does
 # Is reloading logic needed (does the trigger even work?)
 # Keep commands / listener(s) short (seperate files?) and hook them up via functions.
@@ -25,6 +26,9 @@ import glob
 # stack-ide session.13953 folders
 
 watchdog = None
+
+
+
 def plugin_loaded():
     global watchdog
     watchdog = StackIDEWatchdog()
@@ -154,7 +158,7 @@ def type_info_for_sel(view,types):
         (from_line_, from_col_) = view.rowcol(region.begin())
         (to_line_, to_col_) = view.rowcol(region.end())
         [type_string, type_span] = filter_enclosing(
-            from_col_+1, to_col_+1,in
+            from_col_+1, to_col_+1,
             from_line_+1, to_line_+1,
             types)[0]
         result = (type_string, type_span)
@@ -246,6 +250,22 @@ class GotoDefinitionAtCursorCommand(sublime_plugin.TextCommand):
         else:
             sublime.status_message("{} not found!", info.name)
 
+
+class CopyHsTypeAtCursorCommand(sublime_plugin.TextCommand):
+    """
+    A copy_hs_type_at_cursor command that requests the type of the
+    expression under the cursor and, if available, puts it in the clipboard.
+    """
+    def run(self,edit):
+        request = StackIDE.Req.get_exp_types(span_from_view_selection(self.view))
+        send_request(self.view,request, self._handle_response)
+
+    def _handle_response(self,response):
+        info = type_info_for_sel(self.view,response)
+        if info:
+            (type_str,type_span) = info
+            sublime.set_clipboard(type_str)
+
 def parse_info_result(contents):
     """
     Extracts reponse into a reusable expression info object
@@ -273,22 +293,6 @@ class ExpressionInfo():
         self.file = file
         self.line = line
         self.col = col
-
-
-class CopyHsTypeAtCursorCommand(sublime_plugin.TextCommand):
-    """
-    A copy_hs_type_at_cursor command that requests the type of the
-    expression under the cursor and, if available, puts it in the clipboard.
-    """
-    def run(self,edit):
-        request = StackIDE.Req.get_exp_types(span_from_view_selection(self.view))
-        send_request(self.view,request, self._handle_response)
-
-    def _handle_response(self,response):
-        info = type_info_for_sel(self.view,response)
-        if info:
-            (type_str,type_span) = info
-            sublime.set_clipboard(type_str)
 
 
 #############################
@@ -479,6 +483,70 @@ class RestartStackIde(sublime_plugin.ApplicationCommand):
     def run(self):
         StackIDE.reset()
 
+
+def launch_stack_ide(window):
+    """
+    Launches a Stack IDE process for the current window if possible
+    """
+    folder = first_folder(window)
+
+    if not folder:
+        msg = "No folder to monitor for window " + str(window.id())
+        Log.normal(msg)
+        instance = NoStackIDE(msg)
+
+    elif not has_cabal_file(folder):
+        msg = "No cabal file found in " + folder
+        Log.normal(msg)
+        instance = NoStackIDE(msg)
+
+    elif not os.path.isfile(expected_cabalfile(folder)):
+        msg = "Expected cabal file " + expected_cabalfile(folder) + "not found"
+        Log.warning(msg)
+        instance = NoStackIDE(msg)
+
+    elif not is_stack_project(folder):
+        msg = "No stack.yaml in path " + folder
+        Log.warning(msg)
+        instance = NoStackIDE(msg)
+
+        # TODO: We should also support single files, which should get their own StackIDE instance
+        # which would then be per-view. Have a registry per-view that we check, then check the window.
+
+    else:
+        try:
+            # If everything looks OK, launch a StackIDE instance
+            Log.normal("Initializing window", window.id())
+
+            # not clear how constructing an instance should throw a FileNotFoundError
+            instance = StackIDE(window)
+        except FileNotFoundError as e:
+            instance = NoStackIDE("instance init failed -- stack not found")
+            Log.error(e)
+            cls.complain('stack-not-found',
+                "Could not find program 'stack'!\n\n"
+                "Make sure that 'stack' and 'stack-ide' are both installed. "
+                "If they are not on the system path, edit the 'add_to_PATH' "
+                "setting in SublimeStackIDE  preferences." )
+        except Exception:
+            instance = NoStackIDE("instance init failed -- unknown error")
+            Log.error("Failed to initialize window " + str(window.id()) + ":")
+            Log.error(traceback.format_exc())
+
+    # Kick off the process by sending an initial request. We use another thread
+    # to avoid any accidental blocking....
+    def kick_off():
+      Log.normal("Kicking off window", window.id())
+      send_request(window,
+        request     = StackIDE.Req.get_source_errors(),
+        on_response = Win(window).highlight_errors
+      )
+    if not isinstance(instance, NoStackIDE):
+        sublime.set_timeout_async(kick_off,300)
+
+    return instance
+
+
 class StackIDE:
     ide_backend_instances = {}
     complaints_shown = set()
@@ -544,66 +612,8 @@ class StackIDE:
         # Thw windows remaining in current_windows are new, so they have no instance.
         # We try to create one for them
         for window in current_windows.values():
-            folder = first_folder(window)
-
-            if not folder:
-                # Make sure there is a folder to monitor
-                Log.normal("No folder to monitor for window ", window.id())
-                instance = NoStackIDE("window folder not being monitored")
-
-            elif not has_cabal_file(folder):
-
-                Log.normal("No cabal file found in ", folder)
-                instance = NoStackIDE("window folder not being monitored")
-
-            elif not os.path.isfile(expected_cabalfile(folder)):
-
-                Log.warning("Expected cabal file", expected_cabalfile(folder), "not found")
-                instance = NoStackIDE("window folder not being monitored")
-
-            elif not is_stack_project(folder):
-
-                Log.warning("No stack.yaml in path ", folder)
-                instance = NoStackIDE("window folder not being monitored")
-
-                # TODO: We should also support single files, which should get their own StackIDE instance
-                # which would then be per-view. Have a registry per-view that we check, then check the window.
-
-            else:
-                try:
-                    # If everything looks OK, launch a StackIDE instance
-                    Log.normal("Initializing window", window.id())
-                    instance = StackIDE(window)
-                except FileNotFoundError as e:
-                    instance = NoStackIDE("instance init failed -- stack not found")
-                    Log.error(e)
-                    cls.complain('stack-not-found',
-                        "Could not find program 'stack'!\n\n"
-                        "Make sure that 'stack' and 'stack-ide' are both installed. "
-                        "If they are not on the system path, edit the 'add_to_PATH' "
-                        "setting in SublimeStackIDE  preferences." )
-                except Exception:
-                    instance = NoStackIDE("instance init failed -- unknown error")
-                    Log.error("Failed to initialize window " + str(window.id()) + ":")
-                    Log.error(traceback.format_exc())
-
             # Cache the instance
-            StackIDE.ide_backend_instances[window.id()] = instance
-
-            # Nothing left to do
-            if isinstance(instance, NoStackIDE):
-                continue
-
-            # Kick off the process by sending an initial request. We use another thread
-            # to avoid any accidental blocking....
-            def kick_off():
-              Log.normal("Kicking off window", window.id())
-              send_request(window,
-                request     = StackIDE.Req.get_source_errors(),
-                on_response = Win(window).highlight_errors
-              )
-            sublime.set_timeout_async(kick_off,300)
-
+            StackIDE.ide_backend_instances[window.id()] = launch_stack_ide(window)
 
     @classmethod
     def is_running(cls, window):
@@ -1098,7 +1108,7 @@ class Log:
 
       if verb <= Log.verbosity:
           for line in ''.join(map(lambda x: str(x), msg)).split('\n'):
-              print('[SublimeStackIDE]['+cls._show_verbosity(verb)+']:', msg)
+              print('SublimeStackIDE ['+cls._show_verbosity(verb)+']:', msg)
 
           if verb == Log.VERB_ERROR:
               sublime.status_message('There were errors, check the console log')
