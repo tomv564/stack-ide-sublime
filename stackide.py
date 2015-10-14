@@ -219,7 +219,7 @@ def launch_stack_ide(window):
         instance = NoStackIDE(msg)
 
     elif not os.path.isfile(expected_cabalfile(folder)):
-        msg = "Expected cabal file " + expected_cabalfile(folder) + "not found"
+        msg = "Expected cabal file " + expected_cabalfile(folder) + " not found"
         Log.warning(msg)
         instance = NoStackIDE(msg)
 

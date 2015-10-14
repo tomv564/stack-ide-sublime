@@ -88,6 +88,12 @@ class LaunchTests(unittest.TestCase):
     self.assertIsInstance(instance, stackide.NoStackIDE)
     self.assertRegex(instance.reason, "No stack.yaml in path.*")
 
+  def test_launch_window_with_wrong_cabal_file(self):
+    cur_dir = os.path.dirname(os.path.realpath(__file__))
+    instance = stackide.launch_stack_ide(mock_window([cur_dir + '/mocks/cabalfile_wrong_project']))
+    self.assertIsInstance(instance, stackide.NoStackIDE)
+    self.assertRegex(instance.reason, "cabalfile_wrong_project.cabal not found.*")
+
   @unittest.skip("this hangs once stack ide is launched")
   def test_launch_window_with_helloworld_project(self):
     cur_dir = os.path.dirname(os.path.realpath(__file__))
