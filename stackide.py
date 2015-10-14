@@ -147,19 +147,11 @@ def relative_view_file_name(view):
     """
     return view.file_name().replace(first_folder(view.window()) + "/", "")
 
-def get_window(view_or_window):
-    """
-    Accepts a View or a Window and returns the Window
-    """
-    return view_or_window.window() if hasattr(view_or_window, 'window') else view_or_window
-
-
-def send_request(view_or_window, request, on_response = None):
+def send_request(window, request, on_response = None):
     """
     Sends the given request to the (view's) window's stack-ide instance,
     optionally handling its response
     """
-    window = get_window(view_or_window)
     if StackIDE.is_running(window):
         StackIDE.for_window(window).send_request(request, on_response)
 
@@ -340,7 +332,7 @@ class GotoDefinitionAtCursorCommand(sublime_plugin.TextCommand):
     """
     def run(self,edit):
         request = StackIDE.Req.get_exp_info(span_from_view_selection(self.view))
-        send_request(self.view,request, self._handle_response)
+        send_request(self.view.window() ,request, self._handle_response)
 
     def _handle_response(self,response):
 
@@ -366,7 +358,7 @@ class CopyHsTypeAtCursorCommand(sublime_plugin.TextCommand):
     """
     def run(self,edit):
         request = StackIDE.Req.get_exp_types(span_from_view_selection(self.view))
-        send_request(self.view,request, self._handle_response)
+        send_request(self.view.window(), request, self._handle_response)
 
     def _handle_response(self,response):
         info = type_info_for_sel(self.view,response)
@@ -413,7 +405,8 @@ class StackIDESaveListener(sublime_plugin.EventListener):
     then request a report of source errors.
     """
     def on_post_save(self, view):
-        if not StackIDE.is_running(view.window()):
+        window = view.window()
+        if not StackIDE.is_running(window):
             return
         request = {
             "tag":"RequestUpdateSession",
@@ -429,8 +422,8 @@ class StackIDESaveListener(sublime_plugin.EventListener):
         #           }
         #         ]
         #     }
-        send_request(view, request)
-        send_request(view, StackIDE.Req.get_source_errors(),Win(view).highlight_errors)
+        send_request(window, request)
+        send_request(window, StackIDE.Req.get_source_errors(),Win(window).highlight_errors)
 
 class StackIDETypeAtCursorHandler(sublime_plugin.EventListener):
     """
@@ -440,7 +433,8 @@ class StackIDETypeAtCursorHandler(sublime_plugin.EventListener):
     def on_selection_modified(self, view):
         if not view:
             return
-        if not StackIDE.is_running(view.window()):
+        window = view.window()
+        if not StackIDE.is_running(window):
             return
         # Only try to get types for views into files
         # (rather than e.g. the find field or the console pane)
@@ -448,7 +442,7 @@ class StackIDETypeAtCursorHandler(sublime_plugin.EventListener):
             # Uncomment to see the scope at the cursor:
             # Log.debug(view.scope_name(view.sel()[0].begin()))
             request = StackIDE.Req.get_exp_types(span_from_view_selection(view))
-            send_request(view, request, Win(view).highlight_type)
+            send_request(window, request, Win(window).highlight_type)
 
 def get_keypath(a_dict, keypath):
     """
@@ -474,14 +468,16 @@ class StackIDEAutocompleteHandler(sublime_plugin.EventListener):
         self.returned_completions = []
 
     def on_query_completions(self, view, prefix, locations):
-        if not StackIDE.is_running(view.window()):
+
+        window = view.window()
+        if not StackIDE.is_running(window):
             return
         # Check if this completion query is due to our refreshing the completions list
         # after receiving a response from stack-ide, and if so, don't send
         # another request for completions.
         if not view.settings().get("refreshing_auto_complete"):
             request = StackIDE.Req.get_autocompletion(filepath=relative_view_file_name(view),prefix=prefix)
-            send_request(view, request, Win(view).update_completions)
+            send_request(window, request, Win(window).update_completions)
 
         # Clear the flag to uninhibit future completion queries
         view.settings().set("refreshing_auto_complete", False)
@@ -920,8 +916,8 @@ class Win:
     Operations on Sublime windows that are relevant to us
     """
 
-    def __init__(self,view_or_window):
-        self.window = get_window(view_or_window)
+    def __init__(self, window):
+        self.window = window
 
 
     def update_completions(self, completions):
