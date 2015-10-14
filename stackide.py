@@ -177,9 +177,10 @@ def span_from_view_region(view, region):
         "spanToColumn": to_col + 1
         }
 
-def module_name_for_view(view):
-    module_name = view.substr(view.find("^module [A-Za-z._]*", 0)).replace("module ", "")
-    return module_name
+# TODO: Delete if not needed in near future.
+# def module_name_for_view(view):
+#     module_name = view.substr(view.find("^module [A-Za-z._]*", 0)).replace("module ", "")
+#     return module_name
 
 def filter_enclosing(from_col, to_col, from_line, to_line, spans):
     return [span for span in spans if

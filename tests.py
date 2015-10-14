@@ -114,18 +114,16 @@ class StackIDETests(unittest.TestCase):
       self.assertTrue(instance.is_alive)
 
 
-  def test_can_send_request(self):
+  def test_can_send_source_errors_request(self):
       process = FakeProcess()
       process.send_request = Mock()
       instance = stackide.StackIDE(sublime.FakeWindow('./mocks/helloworld/'), process)
       self.assertIsNotNone(instance)
       self.assertTrue(instance.is_active)
       self.assertTrue(instance.is_alive)
-      instance.end()
-      self.assertFalse(instance.is_active)
-      self.assertFalse(instance.is_alive)
-      self.assertEqual(1, len(process.send_request.mock_calls))
-
+      req = stackide.StackIDE.Req.get_source_errors
+      instance.send_request(req)
+      process.send_request.assert_called_with(req)
 
   def test_can_shutdown(self):
       process = FakeProcess()
@@ -141,7 +139,21 @@ class StackIDETests(unittest.TestCase):
       # self.assertEqual(1, len(process.send_request.mock_calls))
 
 
+class UtilTests(unittest.TestCase):
 
+  def test_get_relative_filename(self):
+
+      cur_dir = os.path.dirname(os.path.realpath(__file__))
+      window = mock_window([cur_dir + '/mocks/helloworld'])
+
+      view = MagicMock()
+      view.window = Mock()
+      view.window.return_value = window
+      view.file_name = Mock()
+      view.file_name.return_value = cur_dir + '/mocks/helloworld/Setup.hs'
+      # calls view.window() , first_folder calls window.folders()
+      # calls view.file_name()
+      self.assertEqual('Setup.hs', stackide.relative_view_file_name(view))
 
 class CommandTests(unittest.TestCase):
 
@@ -150,22 +162,6 @@ class CommandTests(unittest.TestCase):
       cmd.view = MagicMock()
       cmd.run(None)
       cmd.view.erase.assert_called_with(ANY, ANY)
-
-class TestStringMethods(unittest.TestCase):
-
-  def test_upper(self):
-      self.assertEqual('foo'.upper(), 'FOO')
-
-  def test_isupper(self):
-      self.assertTrue('FOO'.isupper())
-      self.assertFalse('Foo'.isupper())
-
-  def test_split(self):
-      s = 'hello world'
-      self.assertEqual(s.split(), ['hello', 'world'])
-      # check that s.split fails when the separator is not a string
-      with self.assertRaises(TypeError):
-          s.split(2)
 
 if __name__ == '__main__':
     unittest.main()
