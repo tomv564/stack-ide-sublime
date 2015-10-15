@@ -155,12 +155,18 @@ def send_request(window, request, on_response = None):
     if StackIDE.is_running(window):
         StackIDE.for_window(window).send_request(request, on_response)
 
-def span_from_view_selection(view):
-    return span_from_view_region(view, view.sel()[0])
+def get_view_selection(view):
+    region = view.sel()[0]
+    return (view.rowcol(region.begin()), view.rowcol(region.end()))
 
-def span_from_view_region(view, region):
-    (from_line, from_col) = view.rowcol(region.begin())
-    (to_line,   to_col)   = view.rowcol(region.end())
+# TODO: I see no motivation to keep these functions separate.
+# def span_from_view_selection(view):
+#     return span_from_view_region(view, view.sel()[0])
+
+def span_from_view_selection(view):
+    ((from_line, from_col), (to_line, to_col)) = get_view_selection(view)
+    # (from_line, from_col) = view.rowcol(region.begin())
+    # (to_line,   to_col)   = view.rowcol(region.end())
     return {
         "spanFilePath": relative_view_file_name(view),
         "spanFromLine": from_line + 1,
@@ -191,9 +197,10 @@ def type_info_for_sel(view,types):
     """
     result = None
     if view and types:
-        region = view.sel()[0]
-        (from_line_, from_col_) = view.rowcol(region.begin())
-        (to_line_, to_col_) = view.rowcol(region.end())
+        ((from_line_, from_col_), (to_line_, to_col_)) = get_view_selection(view)
+        # region = view.sel()[0]
+        # (from_line_, from_col_) = view.rowcol(region.begin())
+        # (to_line_, to_col_) = view.rowcol(region.end())
         [type_string, type_span] = filter_enclosing(
             from_col_+1, to_col_+1,
             from_line_+1, to_line_+1,

@@ -107,7 +107,35 @@ class FakeProcess():
   def __init__(self):
     pass
 
+class SelectionTests(unittest.TestCase):
 
+  def test_span_from_view_selection(self):
+    cur_dir = os.path.dirname(os.path.realpath(__file__))
+
+    region = MagicMock()
+    region.begin = Mock()
+    region.begin.return_value = 1
+    region.end = Mock()
+    region.end.return_value = 2
+    window = mock_window([cur_dir + '/mocks/helloworld'])
+
+    view = MagicMock()
+    view.window = Mock()
+    view.window.return_value = window
+    view.sel = Mock()
+    view.sel.return_value = [region]
+    view.file_name = Mock()
+    view.file_name.return_value = cur_dir + '/mocks/helloworld/Setup.hs'
+    view.sel = Mock()
+    view.rowcol = Mock()
+    view.rowcol.return_value = (0, 0)
+    view.sel.return_value = []
+    span = stackide.span_from_view_selection(view)
+    self.assertEqual(1, span['spanFromLine'])
+    self.assertEqual(1, span['spanToLine'])
+    self.assertEqual(1, span['spanFromColumn'])
+    self.assertEqual(1, span['spanToColumn'])
+    self.assertEqual('Setup.hs', span['spanFilePath'])
 
 
 class StackIDETests(unittest.TestCase):
