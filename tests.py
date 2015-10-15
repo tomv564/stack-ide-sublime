@@ -120,16 +120,10 @@ class SelectionTests(unittest.TestCase):
     window = mock_window([cur_dir + '/mocks/helloworld'])
 
     view = MagicMock()
-    view.window = Mock()
-    view.window.return_value = window
-    view.sel = Mock()
-    view.sel.return_value = [region]
-    view.file_name = Mock()
-    view.file_name.return_value = cur_dir + '/mocks/helloworld/Setup.hs'
-    view.sel = Mock()
-    view.rowcol = Mock()
-    view.rowcol.return_value = (0, 0)
-    view.sel.return_value = []
+    view.window = Mock(return_value = window)
+    view.sel = Mock(return_value = [region])
+    view.file_name = Mock(return_value = cur_dir + '/mocks/helloworld/Setup.hs')
+    view.rowcol = Mock(return_value = (0,0))
     span = stackide.span_from_view_selection(view)
     self.assertEqual(1, span['spanFromLine'])
     self.assertEqual(1, span['spanToLine'])
