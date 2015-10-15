@@ -159,14 +159,8 @@ def get_view_selection(view):
     region = view.sel()[0]
     return (view.rowcol(region.begin()), view.rowcol(region.end()))
 
-# TODO: I see no motivation to keep these functions separate.
-# def span_from_view_selection(view):
-#     return span_from_view_region(view, view.sel()[0])
-
 def span_from_view_selection(view):
     ((from_line, from_col), (to_line, to_col)) = get_view_selection(view)
-    # (from_line, from_col) = view.rowcol(region.begin())
-    # (to_line,   to_col)   = view.rowcol(region.end())
     return {
         "spanFilePath": relative_view_file_name(view),
         "spanFromLine": from_line + 1,
@@ -175,12 +169,12 @@ def span_from_view_selection(view):
         "spanToColumn": to_col + 1
         }
 
-# TODO: Delete if not needed in near future.
-# def module_name_for_view(view):
-#     module_name = view.substr(view.find("^module [A-Za-z._]*", 0)).replace("module ", "")
-#     return module_name
-
+# why span[1] ?
 def filter_enclosing(from_col, to_col, from_line, to_line, spans):
+    """
+    spans are considered enclosing if line starts before or col starts before
+    and line ends after or col ends after given from / to values.
+    """
     return [span for span in spans if
         (   ((span[1].get("spanFromLine")<from_line) or
             (span[1].get("spanFromLine") == from_line and
@@ -198,9 +192,6 @@ def type_info_for_sel(view,types):
     result = None
     if view and types:
         ((from_line_, from_col_), (to_line_, to_col_)) = get_view_selection(view)
-        # region = view.sel()[0]
-        # (from_line_, from_col_) = view.rowcol(region.begin())
-        # (to_line_, to_col_) = view.rowcol(region.end())
         [type_string, type_span] = filter_enclosing(
             from_col_+1, to_col_+1,
             from_line_+1, to_line_+1,

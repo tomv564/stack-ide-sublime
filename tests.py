@@ -113,10 +113,8 @@ class SelectionTests(unittest.TestCase):
     cur_dir = os.path.dirname(os.path.realpath(__file__))
 
     region = MagicMock()
-    region.begin = Mock()
-    region.begin.return_value = 1
-    region.end = Mock()
-    region.end.return_value = 2
+    region.begin = Mock(return_value = 1)
+    region.end = Mock(return_value = 2)
     window = mock_window([cur_dir + '/mocks/helloworld'])
 
     view = MagicMock()
@@ -185,11 +183,18 @@ class UtilTests(unittest.TestCase):
 
 class CommandTests(unittest.TestCase):
 
-  def test_can_clear_view(self):
+  def test_can_clear_panel(self):
       cmd = stackide.ClearErrorPanelCommand()
       cmd.view = MagicMock()
       cmd.run(None)
       cmd.view.erase.assert_called_with(ANY, ANY)
+
+  def test_can_update_panel(self):
+      cmd = stackide.UpdateErrorPanelCommand()
+      cmd.view = MagicMock()
+      cmd.view.size = Mock(return_value = 0)
+      cmd.run(None, 'message')
+      cmd.view.insert.assert_called_with(ANY, 0, "message\n\n")
 
 if __name__ == '__main__':
     unittest.main()
