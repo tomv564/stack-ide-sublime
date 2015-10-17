@@ -43,14 +43,18 @@ def mock_view():
     global cur_dir
     view = MagicMock()
     view.file_path = Mock(return_value=cur_dir + '/mocks/helloworld/Setup.hs')
-    view.window = Mock(
-        return_value=mock_window([cur_dir + '/mocks/helloworld']))
-    view.window().active_view = Mock(return_value=view)
+    view.file_name = Mock(return_value="Setup.hs")
+    window = mock_window([cur_dir + '/mocks/helloworld'])
+    window.active_view = Mock(return_value=view)
+    window.find_open_file = Mock(return_value=view)
+    window.views = Mock(return_value=[view])
+    view.window = Mock(return_value=window)
     region = MagicMock()
     region.begin = Mock(return_value=1)
     region.end = Mock(return_value=2)
     view.sel = Mock(return_value=[region])
     view.rowcol = Mock(return_value=(0, 0))
+    view.text_point = Mock(return_value=20)
     return view
 
 
@@ -423,8 +427,131 @@ class ListenerTests(unittest.TestCase):
             view.window().id()] = instance
 
         listener.on_selection_modified(view)
-        view.set_status.assert_called_with('type_at_cursor', type_info)
-        view.add_regions.assert_called_with('type_at_cursor', ANY, "storage.type", "", sublime.DRAW_OUTLINED)
+        view.set_status.assert_called_with("type_at_cursor", type_info)
+        view.add_regions.assert_called_with("type_at_cursor", ANY, "storage.type", "", sublime.DRAW_OUTLINED)
+
+
+class WinTests(unittest.TestCase):
+
+    def test_highlight_type_clear(self):
+        view = mock_view()
+        stackide.Win(view.window()).highlight_type([])
+        view.set_status.assert_called_with("type_at_cursor", "")
+        view.add_regions.assert_called_with("type_at_cursor", [], "storage.type", "", sublime.DRAW_OUTLINED)
+
+    def test_highlight_no_errors(self):
+        view = mock_view()
+        window = view.window()
+        window.run_command = Mock()
+        panel = MagicMock()
+        window.create_output_panel = Mock(return_value=panel)
+        errors = []
+        stackide.Win(window).highlight_errors(errors)
+        window.create_output_panel.assert_called_with("hide_errors")
+
+        panel.settings().set.assert_called_with("result_file_regex", "^(..[^:]*):([0-9]+):?([0-9]+)?:? (.*)$")
+        window.run_command.assert_any_call("hide_panel",  {"panel": "output.hide_errors"})
+        panel.run_command.assert_called_with("clear_error_panel")
+        panel.set_read_only.assert_any_call(False)
+
+        view.add_regions.assert_any_call("errors", [], "invalid", "dot", sublime.DRAW_OUTLINED)
+        view.add_regions.assert_any_call("warnings", [], "comment", "dot", sublime.DRAW_OUTLINED)
+
+        window.run_command.assert_called_with("hide_panel", {"panel": "output.hide_errors"})
+        panel.set_read_only.assert_any_call(True)
+
+    def test_highlight_errors_and_warnings(self):
+        view = mock_view()
+        window = view.window()
+        window.run_command = Mock()
+        panel = MagicMock()
+        window.create_output_panel = Mock(return_value=panel)
+        error = {
+            "errorKind": "KindError",
+            "errorMsg": "<error message here>",
+            "errorSpan": {
+                "tag": "ProperSpan",
+                "contents": {
+                    "spanFilePath": stackide.relative_view_file_name(view),
+                    "spanFromLine": 1,
+                    "spanFromColumn": 1,
+                    "spanToLine": 1,
+                    "spanToColumn": 5
+                }
+            }
+        }
+        warning = {
+            "errorKind": "KindWarning",
+            "errorMsg": "<warning message here>",
+            "errorSpan": {
+                "tag": "ProperSpan",
+                "contents": {
+                    "spanFilePath": stackide.relative_view_file_name(view),
+                    "spanFromLine": 1,
+                    "spanFromColumn": 1,
+                    "spanToLine": 1,
+                    "spanToColumn": 5
+                }
+            }
+        }
+        errors = [error, warning]
+        stackide.Win(window).highlight_errors(errors)
+        window.create_output_panel.assert_called_with("hide_errors")
+
+        panel.settings().set.assert_called_with("result_file_regex", "^(..[^:]*):([0-9]+):?([0-9]+)?:? (.*)$")
+        window.run_command.assert_any_call("hide_panel",  {"panel": "output.hide_errors"})
+        # panel.run_command.assert_any_call("clear_error_panel")
+        panel.set_read_only.assert_any_call(False)
+
+        # panel should have received a message
+        panel.run_command.assert_any_call("update_error_panel", {"message": "/Users/tomv/Library/Application Support/Sublime Text 3/Packages/SublimeStackIDE/mocks/helloworld/Setup.hs:1:1: KindError:\n<error message here>"})
+
+        view.add_regions.assert_called_with("warnings", [ANY], "comment", "dot", sublime.DRAW_OUTLINED)
+        view.add_regions.assert_any_call('errors', [ANY], 'invalid', 'dot', 2)
+        window.run_command.assert_called_with("show_panel", {"panel": "output.hide_errors"})
+        panel.set_read_only.assert_any_call(True)
+
+
+class AutocompleteTests(unittest.TestCase):
+
+    def test_request_completions(self):
+        view = mock_view()
+        listener = stackide.StackIDEAutocompleteHandler()
+
+        type_info = "YOLO -> Ded"
+        completion = {
+            "idScope": {
+                "idImportedFrom" : {
+                    "moduleName" : "Data.List"
+                }
+            },
+            "idProp": {
+                "idType" : "[a] -> a",
+                "idName" : "head"
+            }
+        }
+
+        # response = {"tag": "", "contents": [completion]}
+
+        backend = MagicMock()
+
+        # backend = FakeBackend(response)
+        instance = stackide.StackIDE(view.window(), backend)
+        # backend.handler = instance.handle_response
+        stackide.StackIDE.ide_backend_instances[
+            view.window().id()] = instance
+
+        view.settings().get = Mock(return_value=False)
+        listener.on_query_completions(view, 'm', []) #locations not used.
+
+        view.settings().set.assert_called_with("refreshing_auto_complete", False)
+
+        req = stackide.StackIDE.Req.get_autocompletion(filepath=stackide.relative_view_file_name(view),prefix="m")
+        req['seq'] = ANY
+
+        backend.send_request.assert_called_with(req)
+        # print(backend.send_request.ca)
+
 
 
 class HighlightErrorsTests(unittest.TestCase):
