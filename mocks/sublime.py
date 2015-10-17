@@ -6,6 +6,8 @@ def status_message(msg):
 def set_timeout_async(fn, delay):
     pass
 
+def set_timeout(fn, delay):
+    fn()
 
 def load_settings():
     pass

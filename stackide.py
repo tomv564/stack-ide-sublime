@@ -154,6 +154,8 @@ def send_request(window, request, on_response = None):
     """
     if StackIDE.is_running(window):
         StackIDE.for_window(window).send_request(request, on_response)
+    else:
+        raise Exception('no running instance for window ' + window.id())
 
 def get_view_selection(view):
     region = view.sel()[0]
@@ -287,7 +289,7 @@ class ShowHsTypeAtCursorCommand(sublime_plugin.TextCommand):
     """
     def run(self,edit):
         request = StackIDE.Req.get_exp_types(span_from_view_selection(self.view))
-        send_request(self.view,request, self._handle_response)
+        send_request(self.view.window(), request, self._handle_response)
 
     def _handle_response(self,response):
         info = type_info_for_sel(self.view,response)
@@ -310,7 +312,6 @@ class ShowHsInfoAtCursorCommand(sublime_plugin.TextCommand):
         if len(response) < 1:
            return
 
-        contents = response[0][0]["contents"]
         info = parse_info_result(response[0][0]["contents"])
 
         if info.file:
@@ -843,7 +844,6 @@ class StackIDE:
         """
         Handles JSON responses from the backend
         """
-
         Log.debug("Got response: ", data)
 
         response = data.get("tag")

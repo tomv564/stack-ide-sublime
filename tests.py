@@ -27,15 +27,28 @@ from mocks import sublime
 # be passed in to all instances? We can then avoid using the static log methods
 # everywhere too.
 
-# stackide.Log.verbosity = stackide.Log.VERB_WARNING
+stackide.Log.verbosity = stackide.Log.VERB_ERROR
 stackide.Settings.settings = {"add_to_PATH": []}
 
 
 def mock_window(paths):
   window = MagicMock()
-  window.folders = Mock()
-  window.folders.return_value = paths
+  window.folders = Mock(return_value = paths)
+  window.id = Mock(return_value = 1234)
   return window
+
+def mock_view():
+  cur_dir = os.path.dirname(os.path.realpath(__file__))
+
+  view = MagicMock()
+  view.file_path = Mock(return_value = cur_dir + '/mocks/helloworld/Setup.hs')
+  view.window = Mock(return_value = mock_window([cur_dir + '/mocks/helloworld']))
+  region = MagicMock()
+  region.begin = Mock(return_value = 1)
+  region.end = Mock(return_value = 2)
+  view.sel = Mock(return_value = [region])
+  view.rowcol = Mock(return_value = (0,0))
+  return view
 
 
 class SupervisorTests(unittest.TestCase):
@@ -102,10 +115,17 @@ class LaunchTests(unittest.TestCase):
 
 
 
-class FakeProcess():
+class FakeBackend():
 
-  def __init__(self):
-    pass
+  def __init__(self, response=None):
+    self.response = response
+    self.handler = None
+
+  def send_request(self, req):
+    self.response["seq"] = req.get("seq")
+    if not self.handler is None:
+        self.handler(self.response)
+
 
 class SelectionTests(unittest.TestCase):
 
@@ -134,34 +154,34 @@ class StackIDETests(unittest.TestCase):
 
   # @unittest.skip("not done yet")
   def test_can_create(self):
-      instance = stackide.StackIDE(sublime.FakeWindow('./mocks/helloworld/'), FakeProcess())
+      instance = stackide.StackIDE(sublime.FakeWindow('./mocks/helloworld/'), FakeBackend())
       self.assertIsNotNone(instance)
       self.assertTrue(instance.is_active)
       self.assertTrue(instance.is_alive)
 
 
   def test_can_send_source_errors_request(self):
-      process = FakeProcess()
-      process.send_request = Mock()
-      instance = stackide.StackIDE(sublime.FakeWindow('./mocks/helloworld/'), process)
+      backend = FakeBackend()
+      backend.send_request = Mock()
+      instance = stackide.StackIDE(sublime.FakeWindow('./mocks/helloworld/'), backend)
       self.assertIsNotNone(instance)
       self.assertTrue(instance.is_active)
       self.assertTrue(instance.is_alive)
-      req = stackide.StackIDE.Req.get_source_errors
+      req = stackide.StackIDE.Req.get_source_errors()
       instance.send_request(req)
-      process.send_request.assert_called_with(req)
+      backend.send_request.assert_called_with(req)
 
   def test_can_shutdown(self):
-      process = FakeProcess()
-      process.send_request = Mock()
-      instance = stackide.StackIDE(sublime.FakeWindow('./mocks/helloworld/'), process)
+      backend = FakeBackend()
+      backend.send_request = Mock()
+      instance = stackide.StackIDE(sublime.FakeWindow('./mocks/helloworld/'), backend)
       self.assertIsNotNone(instance)
       self.assertTrue(instance.is_active)
       self.assertTrue(instance.is_alive)
       instance.end()
       self.assertFalse(instance.is_active)
       self.assertFalse(instance.is_alive)
-      process.send_request.assert_called_with(stackide.StackIDE.Req.get_shutdown())
+      backend.send_request.assert_called_with(stackide.StackIDE.Req.get_shutdown())
       # self.assertEqual(1, len(process.send_request.mock_calls))
 
 
@@ -181,6 +201,7 @@ class UtilTests(unittest.TestCase):
       # calls view.file_name()
       self.assertEqual('Setup.hs', stackide.relative_view_file_name(view))
 
+
 class CommandTests(unittest.TestCase):
 
   def test_can_clear_panel(self):
@@ -195,6 +216,30 @@ class CommandTests(unittest.TestCase):
       cmd.view.size = Mock(return_value = 0)
       cmd.run(None, 'message')
       cmd.view.insert.assert_called_with(ANY, 0, "message\n\n")
+
+  def test_can_request_show_type(self):
+      cmd = stackide.ShowHsTypeAtCursorCommand()
+      cmd.view = mock_view()
+      cmd.view.show_popup = Mock()
+      type_info = "YOLO -> Ded"
+      span = {
+        # "spanFilePath": relative_view_file_name(view),
+        "spanFromLine": 1,
+        "spanFromColumn": 1,
+        "spanToLine": 1,
+        "spanToColumn": 5
+      }
+      response = {"tag": "", "contents": [[type_info, span]]}
+      backend = FakeBackend(response)
+      instance = stackide.StackIDE(cmd.view.window(), backend)
+      backend.handler = instance.handle_response
+
+      stackide.StackIDE.ide_backend_instances[cmd.view.window().id()] = instance
+      cmd.run(None)
+      cmd.view.show_popup.assert_called_with(type_info)
+
+      # need to mock send_request
+      # also, span_from_view_selection is a lot of mocking!
 
 if __name__ == '__main__':
     unittest.main()
