@@ -1,7 +1,10 @@
 import uuid
 
+current_status = ""
+
 def status_message(msg):
-    pass
+    global current_status
+    current_status = msg
 
 def set_timeout_async(fn, delay):
     pass
@@ -31,6 +34,10 @@ class FakeWindow():
 
 fake_windows = []
 
+ENCODED_POSITION = 1 #flag used for window.open_file
+
+clipboard = None
+
 def create_window(path):
     global fake_windows
     fake_windows.append(FakeWindow(path))
@@ -38,6 +45,10 @@ def create_window(path):
 def destroy_windows():
     global fake_windows
     fake_windows = []
+
+def set_clipboard(text):
+    global clipboard
+    clipboard = text
 
 def windows():
     global fake_windows

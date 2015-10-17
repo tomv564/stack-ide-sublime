@@ -186,7 +186,7 @@ def filter_enclosing(from_col, to_col, from_line, to_line, spans):
              span[1].get("spanToColumn") >= to_col))
         )]
 
-def type_info_for_sel(view,types):
+def type_info_for_sel(view, types):
     """
     Takes the type spans returned from a get_exp_types request and returns a
     tuple (type_string,type_span) of the main expression
@@ -305,7 +305,7 @@ class ShowHsInfoAtCursorCommand(sublime_plugin.TextCommand):
     """
     def run(self,edit):
         request = StackIDE.Req.get_exp_info(span_from_view_selection(self.view))
-        send_request(self.view,request, self._handle_response)
+        send_request(self.view.window(), request, self._handle_response)
 
     def _handle_response(self,response):
 
@@ -407,10 +407,7 @@ class StackIDESaveListener(sublime_plugin.EventListener):
         window = view.window()
         if not StackIDE.is_running(window):
             return
-        request = {
-            "tag":"RequestUpdateSession",
-            "contents": []
-            }
+
         # This works to load the saved file into stack-ide, but since it doesn't the include dirs
         # (we don't have the API for that yet, though it wouldn't be hard to add) it won't see any modules.
         # request = {
@@ -421,7 +418,7 @@ class StackIDESaveListener(sublime_plugin.EventListener):
         #           }
         #         ]
         #     }
-        send_request(window, request)
+        send_request(window, StackIDE.Req.update_session())
         send_request(window, StackIDE.Req.get_source_errors(),Win(window).highlight_errors)
 
 class StackIDETypeAtCursorHandler(sublime_plugin.EventListener):
@@ -689,9 +686,14 @@ class StackIDE:
     complaints_shown = set()
 
     class Req:
+
+        @staticmethod
+        def update_session():
+            return { "tag":"RequestUpdateSession", "contents": []}
+
         @staticmethod
         def get_source_errors():
-            return {"tag": "RequestGetSourceErrors", "contents":[]}
+            return {"tag": "RequestGetSourceErrors", "contents": []}
 
         @staticmethod
         def get_exp_types(exp_span):
