@@ -35,6 +35,7 @@ class FakeWindow():
 fake_windows = []
 
 ENCODED_POSITION = 1 #flag used for window.open_file
+DRAW_OUTLINED = 2 # flag used for view.add_regions
 
 clipboard = None
 

@@ -45,6 +45,7 @@ def mock_view():
     view.file_path = Mock(return_value=cur_dir + '/mocks/helloworld/Setup.hs')
     view.window = Mock(
         return_value=mock_window([cur_dir + '/mocks/helloworld']))
+    view.window().active_view = Mock(return_value=view)
     region = MagicMock()
     region.begin = Mock(return_value=1)
     region.end = Mock(return_value=2)
@@ -407,7 +408,7 @@ class ListenerTests(unittest.TestCase):
         view = mock_view()
         type_info = "YOLO -> Ded"
         span = {
-            # "spanFilePath": relative_view_file_name(view),
+            "spanFilePath": stackide.relative_view_file_name(view),
             "spanFromLine": 1,
             "spanFromColumn": 1,
             "spanToLine": 1,
@@ -418,16 +419,13 @@ class ListenerTests(unittest.TestCase):
         backend = FakeBackend(response)
         instance = stackide.StackIDE(view.window(), backend)
         backend.handler = instance.handle_response
-
         stackide.StackIDE.ide_backend_instances[
             view.window().id()] = instance
 
         listener.on_selection_modified(view)
+        view.set_status.assert_called_with('type_at_cursor', type_info)
+        view.add_regions.assert_called_with('type_at_cursor', ANY, "storage.type", "", sublime.DRAW_OUTLINED)
 
-        #TODO: test highlight_type output.
-
-        #backend.send_request.assert_any_call(stackide.StackIDE.Req.update_session())
-        # backend.send_request.assert_called_with(stackide.StackIDE.Req.get_source_errors())
 
 class HighlightErrorsTests(unittest.TestCase):
 

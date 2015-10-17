@@ -419,7 +419,7 @@ class StackIDESaveListener(sublime_plugin.EventListener):
         #         ]
         #     }
         send_request(window, StackIDE.Req.update_session())
-        send_request(window, StackIDE.Req.get_source_errors(),Win(window).highlight_errors)
+        send_request(window, StackIDE.Req.get_source_errors(), Win(window).highlight_errors)
 
 class StackIDETypeAtCursorHandler(sublime_plugin.EventListener):
     """
@@ -938,7 +938,7 @@ class Win:
         if types:
             # Display the first type in a region and in the status bar
             view = self.window.active_view()
-            (type_string,type_span) = type_info_for_sel(view,types)
+            (type_string, type_span) = type_info_for_sel(view, types)
             span = Span.from_json(type_span, self.window)
             if span:
                 if Settings.show_popup():
