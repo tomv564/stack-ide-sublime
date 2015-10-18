@@ -312,15 +312,16 @@ class ShowHsInfoAtCursorCommand(sublime_plugin.TextCommand):
         if len(response) < 1:
            return
 
-        info = parse_info_result(response[0][0]["contents"])
+        infos = parse_span_info_response(response)
+        (props, scope), span = next(infos)
 
-        if info.file:
-            source = "(Defined in {}:{}:{})".format(info.file, info.line, info.col)
-        elif info.module:
-            source = "(Imported from {})".format(info.module)
+        if not props.defSpan is None:
+            source = "(Defined in {}:{}:{})".format(props.defSpan.filePath, props.defSpan.fromLine, props.defSpan.fromColumn)
+        elif scope.importedFrom:
+            source = "(Imported from {})".format(scope.importedFrom.module)
 
-        self.view.show_popup("{} :: {}  {}".format(info.name,
-                                                    info.type,
+        self.view.show_popup("{} :: {}  {}".format(props.name,
+                                                    props.type,
                                                     source))
 
 
@@ -338,16 +339,17 @@ class GotoDefinitionAtCursorCommand(sublime_plugin.TextCommand):
         if len(response) < 1:
            return
 
-        info = parse_info_result(response[0][0]["contents"])
+        infos = parse_span_info_response(response)
+        (props, scope), span = next(infos)
         window = self.view.window()
-        if info.file:
-            full_path = os.path.join(first_folder(window), info.file)
+        if props.defSpan:
+            full_path = os.path.join(first_folder(window), props.defSpan.filePath)
             window.open_file(
-              '{}:{}:{}'.format(full_path, info.line or 0, info.col or 0), sublime.ENCODED_POSITION)
-        elif info.module:
-            sublime.status_message("Cannot navigate to {}, it is imported from {}".format(info.name, info.module))
+              '{}:{}:{}'.format(full_path, props.defSpan.fromLine or 0, props.defSpan.fromColumn or 0), sublime.ENCODED_POSITION)
+        elif scope.importedFrom:
+            sublime.status_message("Cannot navigate to {}, it is imported from {}".format(props.name, scope.importedFrom.module))
         else:
-            sublime.status_message("{} not found!", info.name)
+            sublime.status_message("{} not found!", props.name)
 
 
 class CopyHsTypeAtCursorCommand(sublime_plugin.TextCommand):
@@ -365,33 +367,122 @@ class CopyHsTypeAtCursorCommand(sublime_plugin.TextCommand):
             (type_str,type_span) = info
             sublime.set_clipboard(type_str)
 
-def parse_info_result(contents):
+
+# see: https://github.com/commercialhaskell/stack-ide/blob/master/stack-ide-api/src/Stack/Ide/JsonAPI.hs
+# and: https://github.com/fpco/ide-backend/blob/master/ide-backend-common/IdeSession/Types/Public.hs
+# Types of responses:
+# ResponseGetSourceErrors [SourceError]
+# ResponseGetLoadedModules [ModuleName]
+# ResponseGetSpanInfo [ResponseSpanInfo]
+# ResponseGetExpTypes [ResponseExpType]
+# ResponseGetAnnExpTypes [ResponseAnnExpType]
+# ResponseGetAutocompletion [IdInfo]
+
+
+def parse_source_errors(contents):
     """
-    Extracts reponse into a reusable expression info object
+    Converts ResponseGetSourceErrors content into an array of SourceError objects
     """
-    module_keypath = ["idScope", "idImportedFrom", "moduleName"]
-    type_keypath   = ["idProp", "idType"]
-    name_keypath   = ["idProp", "idName"]
-    def_file_keypath   = ["idProp", "idDefSpan", "contents", "spanFilePath"]
-    def_line_keypath      = ["idProp", "idDefSpan", "contents", "spanFromLine"]
-    def_col_keypath       = ["idProp", "idDefSpan", "contents", "spanFromColumn"]
+    return (SourceError() for item in contents)
 
-    return ExpressionInfo(get_keypath(contents, name_keypath),
-                            get_keypath(contents, type_keypath),
-                            get_keypath(contents, module_keypath),
-                            get_keypath(contents, def_file_keypath),
-                            get_keypath(contents, def_line_keypath),
-                            get_keypath(contents, def_col_keypath))
 
-class ExpressionInfo():
+class SourceError():
 
-    def __init__(self, name, type, module, file, line, col):
-        self.name = name
-        self.type = type
+    def __init__(self):
+        pass
+
+def get_paths(paths, values):
+    """
+    Converts a list of keypaths into an array of values from a dict
+    """
+    return list(values.get(path) for path in paths)
+
+def parse_source_span(json):
+    """
+    Converts json into a SourceSpan
+    """
+    paths = ['spanFilePath', 'spanFromLine', 'spanFromColumn', 'spanToLine', 'spanToColumn']
+    fields = get_paths(paths, json)
+    return SourceSpan(*fields) if fields else None
+
+class SourceSpan():
+
+    def __init__(self, filePath, fromLine, fromColumn, toLine, toColumn):
+        self.filePath = filePath
+        self.fromLine = fromLine
+        self.fromColumn = fromColumn
+        self.toLine = toLine
+        self.toColumn = toColumn
+
+def parse_exp_types(contents):
+    """
+    Converts ResponseGetExpTypes contents into an array of pairs containing
+    Text and SourceSpan
+    Also see: type_info_for_sel (replace)
+    """
+    return map(lambda item: (item[0], parse_source_span(item[1])), contents)
+
+
+def parse_idprop(values):
+    """
+    Converts idProp content into an IdProp object.
+    """
+    defSpan = values.get('idDefSpan')
+    return IdProp(values.get('idDefinedIn').get('moduleName'),
+                    values.get('idDefinedIn').get('modulePackage').get('packageName'),
+                    values.get('idType'),
+                    values.get('idName'),
+                    parse_source_span(defSpan.get('contents')) if defSpan.get('tag') == 'ProperSpan' else None)
+
+def parse_idscope(values):
+    """
+    Converts idScope content into an IdScope object (containing only an IdImportedFrom)
+    """
+    importedFrom = values.get('idImportedFrom')
+    return IdScope(IdImportedFrom(importedFrom.get('moduleName'),
+                                  importedFrom.get('modulePackage').get('packageName'))) if importedFrom else None
+
+class IdScope():
+
+    def __init__(self, importedFrom):
+        self.importedFrom = importedFrom
+
+class IdImportedFrom():
+
+    def __init__(self, module, package):
         self.module = module
-        self.file = file
-        self.line = line
-        self.col = col
+        self.package = package
+
+class IdProp():
+
+    def __init__(self, package, module, type, name, defSpan):
+        self.package = package
+        self.module = module
+        self.type = type
+        self.name = name
+        self.defSpan = defSpan
+
+def parse_span_info(json):
+    """
+    Converts SpanInfo contents into a pair of IdProp and IdScope objects
+
+    :param dict json: responds to a Span type from Stack IDE
+
+    SpanInfo is either 'tag' SpanId or 'tag' SpanQQ, with an nested under as contents IdInfo
+    TODO: deal with SpanQQ here
+    """
+    contents = json.get('contents')
+    return (parse_idprop(contents.get('idProp')),
+            parse_idscope(contents.get('idScope')))
+
+
+def parse_span_info_response(contents):
+    """
+    Converts ResponseGetSpanInfo contents into an array of pairs of SpanInfo and SourceSpan objects
+    ResponseGetSpanInfo's contents are an array of SpanInfo and SourceSpan pairs
+    """
+    return ((parse_span_info(responseSpanInfo[0]),
+            parse_source_span(responseSpanInfo[1])) for responseSpanInfo in contents)
 
 
 #############################
@@ -632,7 +723,7 @@ class JsonProcessBackend:
         Reads JSON responses from stack-ide and dispatch them to
         various main thread handlers.
         """
-        while self.process.poll() is None:
+        while self._process.poll() is None:
             try:
                 raw = self._process.stdout.readline().decode('UTF-8')
                 if not raw:
@@ -1174,7 +1265,7 @@ class Log:
   @classmethod
   def _record(cls, verb, *msg):
       if not Log.verbosity:
-          Log.set_verbosity("normal")
+          Log.set_verbosity("debug")
 
       if verb <= Log.verbosity:
           for line in ''.join(map(lambda x: str(x), msg)).split('\n'):

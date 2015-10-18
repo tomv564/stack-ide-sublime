@@ -27,6 +27,62 @@ from mocks import sublime
 # be passed in to all instances? We can then avoid using the static log methods
 # everywhere too.
 
+# TEST DATA
+
+source_error = {}
+
+someFunc_span_info = {'contents': [[{'contents': {'idProp': {'idDefinedIn': {'moduleName': 'Lib', 'modulePackage': {'packageVersion': None, 'packageName': 'main', 'packageKey': 'main'}}, 'idSpace': 'VarName', 'idType': 'IO ()', 'idDefSpan': {'contents': {'spanFromLine': 9, 'spanFromColumn': 1, 'spanToColumn': 9, 'spanFilePath': 'src/Lib.hs', 'spanToLine': 9}, 'tag': 'ProperSpan'}, 'idName': 'someFunc', 'idHomeModule': None}, 'idScope': {'idImportQual': '', 'idImportedFrom': {'moduleName': 'Lib', 'modulePackage': {'packageVersion': None, 'packageName': 'main', 'packageKey': 'main'}}, 'idImportSpan': {'contents': {'spanFromLine': 3, 'spanFromColumn': 1, 'spanToColumn': 11, 'spanFilePath': 'app/Main.hs', 'spanToLine': 3}, 'tag': 'ProperSpan'}, 'tag': 'Imported'}}, 'tag': 'SpanId'}, {'spanFromLine': 7, 'spanFromColumn': 27, 'spanToColumn': 35, 'spanFilePath': 'app/Main.hs', 'spanToLine': 7}]], 'seq': '724752c9-a7bf-4658-834a-3ff7df64e7e5', 'tag': 'ResponseGetSpanInfo'}
+putStrLn_span_info = {'contents': [[{'contents': {'idProp': {'idDefinedIn': {'moduleName': 'System.IO', 'modulePackage': {'packageVersion': '4.8.1.0', 'packageName': 'base', 'packageKey': 'base'}}, 'idSpace': 'VarName', 'idType': 'String -> IO ()', 'idDefSpan': {'contents': '<no location info>', 'tag': 'TextSpan'}, 'idName': 'putStrLn', 'idHomeModule': {'moduleName': 'System.IO', 'modulePackage': {'packageVersion': '4.8.1.0', 'packageName': 'base', 'packageKey': 'base'}}}, 'idScope': {'idImportQual': '', 'idImportedFrom': {'moduleName': 'Prelude', 'modulePackage': {'packageVersion': '4.8.1.0', 'packageName': 'base', 'packageKey': 'base'}}, 'idImportSpan': {'contents': {'spanFromLine': 1, 'spanFromColumn': 8, 'spanToColumn': 12, 'spanFilePath': 'app/Main.hs', 'spanToLine': 1}, 'tag': 'ProperSpan'}, 'tag': 'Imported'}}, 'tag': 'SpanId'}, {'spanFromLine': 7, 'spanFromColumn': 41, 'spanToColumn': 49, 'spanFilePath': 'app/Main.hs', 'spanToLine': 7}]], 'seq': '6ee8d949-82bd-491d-8b79-ffcaa3e65fde', 'tag': 'ResponseGetSpanInfo'}
+
+# span_info_module = {
+#             "idScope": {
+#                 "idImportedFrom": {
+#                     "moduleName": "Main",
+#                     "modulePackage": {
+#                         "packageName": "main"
+#                     }
+#                 }
+#             },
+#             "idProp": {
+#                 "idDefinedIn": {
+#                     "moduleName": "Main",
+#                     "modulePackage": {
+#                         "packageName": "main"
+#                     }
+#                 },
+#                 "idType": "IO ()",
+#                 "idName": "main"
+#             }
+#         }
+
+# span_info_file = {
+#             "idProp": {
+#                 "idDefinedIn": {
+#                     "moduleName": "Main",
+#                     "modulePackage": {
+#                         "packageName": "main"
+#                     }
+#                 },
+#                 "idType": "IO ()",
+#                 "idName": "main",
+#                 "idDefSpan": {
+#                     "contents": {
+#                         "spanFilePath": "src/Main.hs",
+#                         "spanFromLine": "5",
+#                         "spanFromColumn": "3"
+#                     }
+#                 }
+#             },
+#             "idScope": {
+#                 "idImportedFrom": {
+#                     "moduleName": "Main",
+#                     "modulePackage": {
+#                         "packageName": "main"
+#                     }
+#                 }
+#             }
+#         }
+
 stackide.Log.verbosity = stackide.Log.VERB_ERROR
 cur_dir = os.path.dirname(os.path.realpath(__file__))
 stackide.Settings.settings = {"add_to_PATH": []}
@@ -56,6 +112,17 @@ def mock_view():
     view.rowcol = Mock(return_value=(0, 0))
     view.text_point = Mock(return_value=20)
     return view
+
+
+class ParsingTests(unittest.TestCase):
+
+    def test_parse_source_errors_empty(self):
+        errors = stackide.parse_source_errors([])
+        self.assertEqual(0, len(list(errors)))
+
+    def test_parse_source_errors_error(self):
+        errors = list(stackide.parse_source_errors([source_error]))
+        self.assertEqual(1, len(errors))
 
 
 class SupervisorTests(unittest.TestCase):
@@ -284,73 +351,37 @@ class CommandTests(unittest.TestCase):
         cmd = stackide.ShowHsInfoAtCursorCommand()
         cmd.view = mock_view()
         cmd.view.show_popup = Mock()
-        info = {
-            "idProp": {
-                "idType": "IO ()",
-                "idName": "main",
-                "idDefSpan": {
-                    "contents": {
-                        "spanFilePath": "src/Main.hs",
-                        "spanFromLine": "5",
-                        "spanFromColumn": "3"
-                    }
-                }
-            }
-        }
-        response = {"tag": "", "contents": [[{"contents" : info}]]}
-        backend = FakeBackend(response)
+
+        # response = {"tag": "", "contents": [[{"contents" : someFunc_span_info}, {}]]}
+        backend = FakeBackend(someFunc_span_info)
         instance = stackide.StackIDE(cmd.view.window(), backend)
         backend.handler = instance.handle_response
 
         stackide.StackIDE.ide_backend_instances[cmd.view.window().id()] = instance
         cmd.run(None)
-        cmd.view.show_popup.assert_called_with("main :: IO ()  (Defined in src/Main.hs:5:3)")
+        cmd.view.show_popup.assert_called_with("someFunc :: IO ()  (Defined in src/Lib.hs:9:1)")
 
 
     def test_show_info_from_module(self):
         cmd = stackide.ShowHsInfoAtCursorCommand()
         cmd.view = mock_view()
         cmd.view.show_popup = Mock()
-        info = {
-            "idScope": {
-                "idImportedFrom": {
-                    "moduleName": "Main"
-                }
-            },
-            "idProp": {
-                "idType": "IO ()",
-                "idName": "main"
-            }
-        }
-        response = {"tag": "", "contents": [[{"contents" : info}]]}
-        backend = FakeBackend(response)
+        # response = {"tag": "", "contents": [[{"contents" : putStrLn_span_info}, {}]]}
+        backend = FakeBackend(putStrLn_span_info)
         instance = stackide.StackIDE(cmd.view.window(), backend)
         backend.handler = instance.handle_response
 
         stackide.StackIDE.ide_backend_instances[cmd.view.window().id()] = instance
         cmd.run(None)
-        cmd.view.show_popup.assert_called_with("main :: IO ()  (Imported from Main)")
+        cmd.view.show_popup.assert_called_with("putStrLn :: String -> IO ()  (Imported from Prelude)")
 
     def test_goto_definition_at_cursor(self):
         global cur_dir
         cmd = stackide.GotoDefinitionAtCursorCommand()
         cmd.view = mock_view()
         cmd.view.show_popup = Mock()
-        info = {
-            "idProp": {
-                "idType": "IO ()",
-                "idName": "main",
-                "idDefSpan": {
-                    "contents": {
-                        "spanFilePath": "src/Main.hs",
-                        "spanFromLine": "5",
-                        "spanFromColumn": "3"
-                    }
-                }
-            }
-        }
-        response = {"tag": "", "contents": [[{"contents" : info}]]}
-        backend = FakeBackend(response)
+        # response = {"tag": "", "contents": [[{"contents": someFunc_span_info}, {}]]}
+        backend = FakeBackend(someFunc_span_info)
         window = cmd.view.window()
         window.open_file = Mock()
         instance = stackide.StackIDE(window, backend)
@@ -358,37 +389,17 @@ class CommandTests(unittest.TestCase):
 
         stackide.StackIDE.ide_backend_instances[cmd.view.window().id()] = instance
         cmd.run(None)
-        window.open_file.assert_called_with(cur_dir + "/mocks/helloworld/src/Main.hs:5:3", sublime.ENCODED_POSITION)
+        window.open_file.assert_called_with(cur_dir + "/mocks/helloworld/src/Lib.hs:9:1", sublime.ENCODED_POSITION)
 
     def test_goto_definition_of_module(self):
         global cur_dir
         cmd = stackide.GotoDefinitionAtCursorCommand()
         cmd.view = mock_view()
         cmd.view.show_popup = Mock()
-        info = {
-            "idScope": {
-                "idImportedFrom": {
-                    "moduleName": "Main"
-                }
-            },
-            "idProp": {
-                "idType": "IO ()",
-                "idName": "main"
-            }
-        }
-        # response = {"tag": "", "contents": [[{"contents" : info}]]}
-        # backend = FakeBackend(response)
-        # window = cmd.view.window()
-        # instance = stackide.StackIDE(window, backend)
-        # backend.handler = instance.handle_response
-
-        # stackide.StackIDE.ide_backend_instances[cmd.view.window().id()] = instance
-        # cmd.run(None)
         window = cmd.view.window()
         window.status_message = Mock()
-        cmd._handle_response([[{"contents": info}]])
-        # window.status_message.assert_called_with("")
-        self.assertEqual("Cannot navigate to main, it is imported from Main", sublime.current_status)
+        cmd._handle_response(putStrLn_span_info.get('contents'))
+        self.assertEqual("Cannot navigate to putStrLn, it is imported from Prelude", sublime.current_status)
 
 
 class ListenerTests(unittest.TestCase):
