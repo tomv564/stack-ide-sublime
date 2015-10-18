@@ -7,6 +7,7 @@ except Exception:
 import subprocess
 import os
 import sys
+from itertools import groupby
 import threading
 import traceback
 import json
@@ -170,6 +171,20 @@ def span_from_view_selection(view):
         "spanToLine": to_line + 1,
         "spanToColumn": to_col + 1
         }
+
+def view_region_from_span(view, span):
+    """
+    Maps a SourceSpan to a Region for a given view.
+
+    :param sublime.View view: The view to create regions for
+    :param SourceSpan span: The span to map to a region
+    :rtype sublime.Region: The created Region
+
+    """
+    from_point = view.text_point(span.fromLine - 1, span.fromColumn - 1)
+    to_point = view.text_point(span.toLine - 1, span.toColumn - 1)
+    return sublime.Region(from_point, to_point)
+
 
 # why span[1] ?
 def filter_enclosing(from_col, to_col, from_line, to_line, spans):
@@ -383,19 +398,41 @@ def parse_source_errors(contents):
     """
     Converts ResponseGetSourceErrors content into an array of SourceError objects
     """
-    return (SourceError() for item in contents)
+    return (SourceError(item.get('errorKind'),
+                        item.get('errorMsg'),
+                        parse_either_span(item.get('errorSpan'))) for item in contents)
 
 
 class SourceError():
 
-    def __init__(self):
-        pass
+    def __init__(self, kind, message, span):
+        self.kind = kind
+        self.msg = message
+        self.span = span
+
+    def __repr__(self):
+        return "{file}:{from_line}:{from_column}: {kind}:\n{msg}".format(
+            file=self.span.filePath,
+            from_line=self.span.fromLine,
+            from_column=self.span.fromColumn,
+            kind=self.kind,
+            msg=self.msg)
+
 
 def get_paths(paths, values):
     """
     Converts a list of keypaths into an array of values from a dict
     """
     return list(values.get(path) for path in paths)
+
+def parse_either_span(json):
+    """
+    Checks EitherSpan content and returns a SourceSpan if possible.
+    """
+    if json.get('tag') == 'ProperSpan':
+        return parse_source_span(json.get('contents'))
+    else:
+        return None
 
 def parse_source_span(json):
     """
@@ -420,19 +457,18 @@ def parse_exp_types(contents):
     Text and SourceSpan
     Also see: type_info_for_sel (replace)
     """
-    return map(lambda item: (item[0], parse_source_span(item[1])), contents)
+    return map(lambda item: (item[0], parse_either_span(item[1])), contents)
 
 
 def parse_idprop(values):
     """
     Converts idProp content into an IdProp object.
     """
-    defSpan = values.get('idDefSpan')
     return IdProp(values.get('idDefinedIn').get('moduleName'),
                     values.get('idDefinedIn').get('modulePackage').get('packageName'),
                     values.get('idType'),
                     values.get('idName'),
-                    parse_source_span(defSpan.get('contents')) if defSpan.get('tag') == 'ProperSpan' else None)
+                    parse_either_span(values.get('idDefSpan')))
 
 def parse_idscope(values):
     """
@@ -1043,10 +1079,16 @@ class Win:
                 view.add_regions("type_at_cursor", [], "storage.type", "", sublime.DRAW_OUTLINED)
 
 
-    def highlight_errors(self, errors):
+    def find_view_for_path(self, file_path):
+        full_path = os.path.join(first_folder(self.window), file_path)
+        return self.window.find_open_file(full_path)
+
+    def highlight_errors(self, source_errors):
         """
         Places errors in the error panel, and highlights the relevant regions for each error.
         """
+
+        # todo: extract and refactor panel management code
         error_panel = self.window.create_output_panel("hide_errors")
         error_panel.set_read_only(False)
 
@@ -1059,50 +1101,33 @@ class Win:
         # Clear the panel
         error_panel.run_command("clear_error_panel")
 
+        errors = list(parse_source_errors(source_errors))
+
+        # OLD: Text commands only accept Value types, so we perform the conversion of the error span to a string here
+        # to pass to update_error_panel.
+        # TODO we should pass the errorKind too if the error has no span
+        # message = span.as_error_message(error) if span else error.get("errorMsg")
+        # NEW: Add the error to the error panel (uses __repr__)
+        for error in errors:
+            error_panel.run_command("update_error_panel", {"message": repr(error)})
+
+        error_regions_by_view_id = {}
+        warning_regions_by_view_id = {}
+
         # We gather each error by the file view it should annotate
         # so we can add regions in bulk to each view.
-        errors_by_view_id = {}
-        warnings_by_view_id = {}
-        for error in errors:
-            proper_span = error.get("errorSpan")
-
-            # Stack-ide can return different kinds of Spans for errors; we only support ProperSpans currently
-            span = None
-            if proper_span.get("tag") == "ProperSpan":
-                span = Span.from_json(proper_span.get("contents"), self.window)
-
-            # Text commands only accept Value types, so we perform the conversion of the error span to a string here
-            # to pass to update_error_panel.
-            # TODO we should pass the errorKind too if the error has no span
-            message = span.as_error_message(error) if span else error.get("errorMsg")
-
-            # Add the error to the error panel
-            error_panel.run_command("update_error_panel", {"message":message})
-
-            # Collect error and warning spans by view for annotations
-            span_view = span.in_view if span else None
-            if span_view:
-                # Log.debug("Adding error at "+ str(span) + ": " + str(error.get("errorMsg")))
-                kind = error.get("errorKind")
-                if kind == "KindWarning":
-                    warning_regions_for_view = warnings_by_view_id.get(span_view.view.id(), [])
-                    warning_regions_for_view += [span_view.region]
-                    warnings_by_view_id[span_view.view.id()] = warning_regions_for_view
+        for path, errors in groupby(errors, lambda error: error.span.filePath):
+            view = self.find_view_for_path(path)
+            for kind, errors in groupby(errors, lambda error: error.kind):
+                if kind == 'KindWarning':
+                    warning_regions_by_view_id[view.id()] = list(view_region_from_span(view, error.span) for error in errors)
                 else:
-                    error_regions_for_view = errors_by_view_id.get(span_view.view.id(), [])
-                    error_regions_for_view += [span_view.region]
-                    errors_by_view_id[span_view.view.id()] = error_regions_for_view
-
-            else:
-                Log.warning("Unhandled error tag type: ", proper_span)
+                    error_regions_by_view_id[view.id()] = list(view_region_from_span(view, error.span) for error in errors)
 
         # Add error/warning regions to their respective views
         for view in self.window.views():
-            # Return an empty list if there are no errors for the view, so that we clear the error regions
-            error_regions = errors_by_view_id.get(view.id(), [])
-            view.add_regions("errors", error_regions, "invalid", "dot", sublime.DRAW_OUTLINED)
-            warning_regions = warnings_by_view_id.get(view.id(), [])
-            view.add_regions("warnings", warning_regions, "comment", "dot", sublime.DRAW_OUTLINED)
+            view.add_regions("errors", error_regions_by_view_id.get(view.id(), []), "invalid", "dot", sublime.DRAW_OUTLINED)
+            view.add_regions("warnings", warning_regions_by_view_id.get(view.id(), []), "comment", "dot", sublime.DRAW_OUTLINED)
 
         if errors:
             # Show the panel
@@ -1161,17 +1186,6 @@ class Span:
         self.to_column      = to_column
         self.full_path      = full_path
         self.in_view        = in_view
-
-    def as_error_message(self, error):
-        kind      = error.get("errorKind")
-        error_msg = error.get("errorMsg")
-
-        return "{file}:{from_line}:{from_column}: {kind}:\n{msg}".format(
-            file=self.full_path,
-            from_line=self.from_line,
-            from_column=self.from_column,
-            kind=kind,
-            msg=error_msg)
 
 
 class Settings:

@@ -29,59 +29,10 @@ from mocks import sublime
 
 # TEST DATA
 
-source_error = {}
+source_errors = {'seq': 'd0599c00-0b77-441c-8947-b3882cab298c', 'tag': 'ResponseGetSourceErrors', 'contents': [{'errorSpan': {'tag': 'ProperSpan', 'contents': {'spanFromColumn': 22, 'spanFromLine': 11, 'spanFilePath': 'src/Lib.hs', 'spanToColumn': 28, 'spanToLine': 11}}, 'errorKind': 'KindError', 'errorMsg': 'Couldn\'t match expected type ‘Integer’ with actual type ‘[Char]’\nIn the first argument of ‘greet’, namely ‘"You!"’\nIn the second argument of ‘($)’, namely ‘greet "You!"’\nIn a stmt of a \'do\' block: putStrLn $ greet "You!"'}, {'errorSpan': {'tag': 'ProperSpan', 'contents': {'spanFromColumn': 24, 'spanFromLine': 15, 'spanFilePath': 'src/Lib.hs', 'spanToColumn': 25, 'spanToLine': 15}}, 'errorKind': 'KindError', 'errorMsg': 'Couldn\'t match expected type ‘[Char]’ with actual type ‘Integer’\nIn the second argument of ‘(++)’, namely ‘s’\nIn the expression: "Hello, " ++ s'}]}
 
 someFunc_span_info = {'contents': [[{'contents': {'idProp': {'idDefinedIn': {'moduleName': 'Lib', 'modulePackage': {'packageVersion': None, 'packageName': 'main', 'packageKey': 'main'}}, 'idSpace': 'VarName', 'idType': 'IO ()', 'idDefSpan': {'contents': {'spanFromLine': 9, 'spanFromColumn': 1, 'spanToColumn': 9, 'spanFilePath': 'src/Lib.hs', 'spanToLine': 9}, 'tag': 'ProperSpan'}, 'idName': 'someFunc', 'idHomeModule': None}, 'idScope': {'idImportQual': '', 'idImportedFrom': {'moduleName': 'Lib', 'modulePackage': {'packageVersion': None, 'packageName': 'main', 'packageKey': 'main'}}, 'idImportSpan': {'contents': {'spanFromLine': 3, 'spanFromColumn': 1, 'spanToColumn': 11, 'spanFilePath': 'app/Main.hs', 'spanToLine': 3}, 'tag': 'ProperSpan'}, 'tag': 'Imported'}}, 'tag': 'SpanId'}, {'spanFromLine': 7, 'spanFromColumn': 27, 'spanToColumn': 35, 'spanFilePath': 'app/Main.hs', 'spanToLine': 7}]], 'seq': '724752c9-a7bf-4658-834a-3ff7df64e7e5', 'tag': 'ResponseGetSpanInfo'}
 putStrLn_span_info = {'contents': [[{'contents': {'idProp': {'idDefinedIn': {'moduleName': 'System.IO', 'modulePackage': {'packageVersion': '4.8.1.0', 'packageName': 'base', 'packageKey': 'base'}}, 'idSpace': 'VarName', 'idType': 'String -> IO ()', 'idDefSpan': {'contents': '<no location info>', 'tag': 'TextSpan'}, 'idName': 'putStrLn', 'idHomeModule': {'moduleName': 'System.IO', 'modulePackage': {'packageVersion': '4.8.1.0', 'packageName': 'base', 'packageKey': 'base'}}}, 'idScope': {'idImportQual': '', 'idImportedFrom': {'moduleName': 'Prelude', 'modulePackage': {'packageVersion': '4.8.1.0', 'packageName': 'base', 'packageKey': 'base'}}, 'idImportSpan': {'contents': {'spanFromLine': 1, 'spanFromColumn': 8, 'spanToColumn': 12, 'spanFilePath': 'app/Main.hs', 'spanToLine': 1}, 'tag': 'ProperSpan'}, 'tag': 'Imported'}}, 'tag': 'SpanId'}, {'spanFromLine': 7, 'spanFromColumn': 41, 'spanToColumn': 49, 'spanFilePath': 'app/Main.hs', 'spanToLine': 7}]], 'seq': '6ee8d949-82bd-491d-8b79-ffcaa3e65fde', 'tag': 'ResponseGetSpanInfo'}
-
-# span_info_module = {
-#             "idScope": {
-#                 "idImportedFrom": {
-#                     "moduleName": "Main",
-#                     "modulePackage": {
-#                         "packageName": "main"
-#                     }
-#                 }
-#             },
-#             "idProp": {
-#                 "idDefinedIn": {
-#                     "moduleName": "Main",
-#                     "modulePackage": {
-#                         "packageName": "main"
-#                     }
-#                 },
-#                 "idType": "IO ()",
-#                 "idName": "main"
-#             }
-#         }
-
-# span_info_file = {
-#             "idProp": {
-#                 "idDefinedIn": {
-#                     "moduleName": "Main",
-#                     "modulePackage": {
-#                         "packageName": "main"
-#                     }
-#                 },
-#                 "idType": "IO ()",
-#                 "idName": "main",
-#                 "idDefSpan": {
-#                     "contents": {
-#                         "spanFilePath": "src/Main.hs",
-#                         "spanFromLine": "5",
-#                         "spanFromColumn": "3"
-#                     }
-#                 }
-#             },
-#             "idScope": {
-#                 "idImportedFrom": {
-#                     "moduleName": "Main",
-#                     "modulePackage": {
-#                         "packageName": "main"
-#                     }
-#                 }
-#             }
-#         }
 
 stackide.Log.verbosity = stackide.Log.VERB_ERROR
 cur_dir = os.path.dirname(os.path.realpath(__file__))
@@ -121,8 +72,23 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(0, len(list(errors)))
 
     def test_parse_source_errors_error(self):
-        errors = list(stackide.parse_source_errors([source_error]))
-        self.assertEqual(1, len(errors))
+        errors = list(stackide.parse_source_errors(source_errors.get('contents')))
+        self.assertEqual(2, len(errors))
+        err1, err2 = errors
+        self.assertEqual(err1.kind, 'KindError')
+        self.assertRegex(err1.msg, "Couldn\'t match expected type ‘Integer’")
+        self.assertEqual(err1.span.filePath, 'src/Lib.hs')
+        self.assertEqual(err1.span.fromLine, 11)
+        self.assertEqual(err1.span.fromColumn, 22)
+
+        self.assertEqual(err2.kind, 'KindError')
+        self.assertRegex(err2.msg, "Couldn\'t match expected type ‘\[Char\]’")
+        self.assertEqual(err2.span.filePath, 'src/Lib.hs')
+        self.assertEqual(err2.span.fromLine, 15)
+        self.assertEqual(err2.span.fromColumn, 24)
+
+
+
 
 
 class SupervisorTests(unittest.TestCase):
@@ -514,8 +480,9 @@ class WinTests(unittest.TestCase):
         # panel.run_command.assert_any_call("clear_error_panel")
         panel.set_read_only.assert_any_call(False)
 
-        # panel should have received a message
-        panel.run_command.assert_any_call("update_error_panel", {"message": "/Users/tomv/Library/Application Support/Sublime Text 3/Packages/SublimeStackIDE/mocks/helloworld/Setup.hs:1:1: KindError:\n<error message here>"})
+        # panel should have received messages
+        panel.run_command.assert_any_call("update_error_panel", {"message": "Setup.hs:1:1: KindError:\n<error message here>"})
+        panel.run_command.assert_any_call("update_error_panel", {"message": "Setup.hs:1:1: KindWarning:\n<warning message here>"})
 
         view.add_regions.assert_called_with("warnings", [ANY], "comment", "dot", sublime.DRAW_OUTLINED)
         view.add_regions.assert_any_call('errors', [ANY], 'invalid', 'dot', 2)
