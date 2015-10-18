@@ -186,37 +186,6 @@ def view_region_from_span(view, span):
     return sublime.Region(from_point, to_point)
 
 
-# why span[1] ?
-def filter_enclosing(from_col, to_col, from_line, to_line, spans):
-    """
-    spans are considered enclosing if line starts before or col starts before
-    and line ends after or col ends after given from / to values.
-    """
-    return [span for span in spans if
-        (   ((span[1].get("spanFromLine")<from_line) or
-            (span[1].get("spanFromLine") == from_line and
-             span[1].get("spanFromColumn") <= from_col))
-        and ((span[1].get("spanToLine")>to_line) or
-            (span[1].get("spanToLine") == to_line and
-             span[1].get("spanToColumn") >= to_col))
-        )]
-
-def type_info_for_sel(view, types):
-    """
-    Takes the type spans returned from a get_exp_types request and returns a
-    tuple (type_string,type_span) of the main expression
-    """
-    result = None
-    if view and types:
-        ((from_line_, from_col_), (to_line_, to_col_)) = get_view_selection(view)
-        [type_string, type_span] = filter_enclosing(
-            from_col_+1, to_col_+1,
-            from_line_+1, to_line_+1,
-            types)[0]
-        result = (type_string, type_span)
-    return result
-
-
 def launch_stack_ide(window):
     """
     Launches a Stack IDE process for the current window if possible
@@ -307,10 +276,10 @@ class ShowHsTypeAtCursorCommand(sublime_plugin.TextCommand):
         send_request(self.view.window(), request, self._handle_response)
 
     def _handle_response(self,response):
-        info = type_info_for_sel(self.view,response)
-        if info:
-            (type_str,type_span) = info
-            self.view.show_popup(type_str)
+        types = list(parse_exp_types(response))
+        if types:
+            (type, span) = types[0]
+            self.view.show_popup(type)
 
 
 class ShowHsInfoAtCursorCommand(sublime_plugin.TextCommand):
@@ -377,10 +346,10 @@ class CopyHsTypeAtCursorCommand(sublime_plugin.TextCommand):
         send_request(self.view.window(), request, self._handle_response)
 
     def _handle_response(self,response):
-        info = type_info_for_sel(self.view,response)
-        if info:
-            (type_str,type_span) = info
-            sublime.set_clipboard(type_str)
+        types = list(parse_exp_types(response))
+        if types:
+            (type, span) = types[0]
+            sublime.set_clipboard(type)
 
 
 # see: https://github.com/commercialhaskell/stack-ide/blob/master/stack-ide-api/src/Stack/Ide/JsonAPI.hs
@@ -457,7 +426,7 @@ def parse_exp_types(contents):
     Text and SourceSpan
     Also see: type_info_for_sel (replace)
     """
-    return map(lambda item: (item[0], parse_either_span(item[1])), contents)
+    return ((item[0], parse_source_span(item[1])) for item in contents)
 
 
 def parse_idprop(values):
@@ -1056,22 +1025,22 @@ class Win:
         self.window.run_command("update_completions", {"completions":completions})
 
 
-    def highlight_type(self, types):
+    def highlight_type(self, exp_types):
         """
         ide-backend gives us a wealth of type info for the cursor. We only use the first,
         most specific one for now, but it gives us the types all the way out to the topmost
         expression.
         """
+        types = list(parse_exp_types(exp_types))
         if types:
             # Display the first type in a region and in the status bar
             view = self.window.active_view()
-            (type_string, type_span) = type_info_for_sel(view, types)
-            span = Span.from_json(type_span, self.window)
+            (type, span) = types[0] # type_info_for_sel(view, types)
             if span:
                 if Settings.show_popup():
-                    view.show_popup(type_string)
-                view.set_status("type_at_cursor", type_string)
-                view.add_regions("type_at_cursor", [span.in_view.region], "storage.type", "", sublime.DRAW_OUTLINED)
+                    view.show_popup(type)
+                view.set_status("type_at_cursor", type)
+                view.add_regions("type_at_cursor", [view_region_from_span(view, span)], "storage.type", "", sublime.DRAW_OUTLINED)
         else:
             # Clear type-at-cursor display
             for view in self.window.views():
@@ -1137,55 +1106,6 @@ class Win:
             self.window.run_command("hide_panel", {"panel":"output.hide_errors"})
 
         error_panel.set_read_only(True)
-
-
-class Span:
-    """
-    Represents the Stack-IDE 'span' type
-    """
-
-    class InView:
-        """
-        When a span corresponds to a file being displayed in a view,
-        this object holds the position of the span inside that view.
-        """
-
-        def __init__(self, view, from_point, to_point, region):
-            self.view           = view
-            self.from_point     = from_point
-            self.to_point       = to_point
-            self.region         = region
-
-    @classmethod
-    def from_json(cls, span, window):
-        file_path    = span.get("spanFilePath")
-        if file_path == None:
-            return None
-        from_line    = span.get("spanFromLine")
-        from_column  = span.get("spanFromColumn")
-        to_line      = span.get("spanToLine")
-        to_column    = span.get("spanToColumn")
-
-        full_path    = first_folder(window) + "/" + file_path
-        view         = window.find_open_file(full_path)
-        if view is None:
-            in_view = None
-        else:
-            from_point = view.text_point(from_line - 1, from_column - 1)
-            to_point   = view.text_point(to_line   - 1, to_column   - 1)
-            region     = sublime.Region(from_point, to_point)
-
-            in_view    = Span.InView(view, from_point, to_point, region)
-
-        return Span(from_line, from_column, to_line, to_column, full_path, in_view)
-
-    def __init__(self, from_line, from_column, to_line, to_column, full_path, in_view):
-        self.from_line      = from_line
-        self.from_column    = from_column
-        self.to_line        = to_line
-        self.to_column      = to_column
-        self.full_path      = full_path
-        self.in_view        = in_view
 
 
 class Settings:

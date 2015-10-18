@@ -33,6 +33,7 @@ source_errors = {'seq': 'd0599c00-0b77-441c-8947-b3882cab298c', 'tag': 'Response
 
 someFunc_span_info = {'contents': [[{'contents': {'idProp': {'idDefinedIn': {'moduleName': 'Lib', 'modulePackage': {'packageVersion': None, 'packageName': 'main', 'packageKey': 'main'}}, 'idSpace': 'VarName', 'idType': 'IO ()', 'idDefSpan': {'contents': {'spanFromLine': 9, 'spanFromColumn': 1, 'spanToColumn': 9, 'spanFilePath': 'src/Lib.hs', 'spanToLine': 9}, 'tag': 'ProperSpan'}, 'idName': 'someFunc', 'idHomeModule': None}, 'idScope': {'idImportQual': '', 'idImportedFrom': {'moduleName': 'Lib', 'modulePackage': {'packageVersion': None, 'packageName': 'main', 'packageKey': 'main'}}, 'idImportSpan': {'contents': {'spanFromLine': 3, 'spanFromColumn': 1, 'spanToColumn': 11, 'spanFilePath': 'app/Main.hs', 'spanToLine': 3}, 'tag': 'ProperSpan'}, 'tag': 'Imported'}}, 'tag': 'SpanId'}, {'spanFromLine': 7, 'spanFromColumn': 27, 'spanToColumn': 35, 'spanFilePath': 'app/Main.hs', 'spanToLine': 7}]], 'seq': '724752c9-a7bf-4658-834a-3ff7df64e7e5', 'tag': 'ResponseGetSpanInfo'}
 putStrLn_span_info = {'contents': [[{'contents': {'idProp': {'idDefinedIn': {'moduleName': 'System.IO', 'modulePackage': {'packageVersion': '4.8.1.0', 'packageName': 'base', 'packageKey': 'base'}}, 'idSpace': 'VarName', 'idType': 'String -> IO ()', 'idDefSpan': {'contents': '<no location info>', 'tag': 'TextSpan'}, 'idName': 'putStrLn', 'idHomeModule': {'moduleName': 'System.IO', 'modulePackage': {'packageVersion': '4.8.1.0', 'packageName': 'base', 'packageKey': 'base'}}}, 'idScope': {'idImportQual': '', 'idImportedFrom': {'moduleName': 'Prelude', 'modulePackage': {'packageVersion': '4.8.1.0', 'packageName': 'base', 'packageKey': 'base'}}, 'idImportSpan': {'contents': {'spanFromLine': 1, 'spanFromColumn': 8, 'spanToColumn': 12, 'spanFilePath': 'app/Main.hs', 'spanToLine': 1}, 'tag': 'ProperSpan'}, 'tag': 'Imported'}}, 'tag': 'SpanId'}, {'spanFromLine': 7, 'spanFromColumn': 41, 'spanToColumn': 49, 'spanFilePath': 'app/Main.hs', 'spanToLine': 7}]], 'seq': '6ee8d949-82bd-491d-8b79-ffcaa3e65fde', 'tag': 'ResponseGetSpanInfo'}
+readFile_exp_types = {'tag': 'ResponseGetExpTypes', 'contents': [['FilePath -> IO String', {'spanToColumn': 25, 'spanToLine': 10, 'spanFromColumn': 17, 'spanFromLine': 10, 'spanFilePath': 'src/Lib.hs'}], ['IO String', {'spanToColumn': 36, 'spanToLine': 10, 'spanFromColumn': 17, 'spanFromLine': 10, 'spanFilePath': 'src/Lib.hs'}], ['IO ()', {'spanToColumn': 28, 'spanToLine': 11, 'spanFromColumn': 12, 'spanFromLine': 9, 'spanFilePath': 'src/Lib.hs'}]], 'seq': 'fd3eb2a5-e390-4ad7-be72-8b2e82441a95'}
 
 stackide.Log.verbosity = stackide.Log.VERB_ERROR
 cur_dir = os.path.dirname(os.path.realpath(__file__))
@@ -87,8 +88,17 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(err2.span.fromLine, 15)
         self.assertEqual(err2.span.fromColumn, 24)
 
+    def test_parse_exp_types_empty(self):
+        exp_types = stackide.parse_exp_types([])
+        self.assertEqual(0, len(list(exp_types)))
 
+    def test_parse_exp_types_readFile(self):
+        exp_types = list(stackide.parse_exp_types(readFile_exp_types.get('contents')))
+        self.assertEqual(3, len(exp_types))
+        (type, span) = exp_types[0]
 
+        self.assertEqual('FilePath -> IO String', type)
+        self.assertEqual('src/Lib.hs', span.filePath)
 
 
 class SupervisorTests(unittest.TestCase):
