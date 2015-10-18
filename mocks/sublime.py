@@ -1,10 +1,15 @@
 import uuid
 
 current_status = ""
+current_error = ""
 
 def status_message(msg):
     global current_status
     current_status = msg
+
+def error_message(msg):
+    global current_error
+    current_error = msg
 
 def set_timeout_async(fn, delay):
     pass

@@ -550,15 +550,40 @@ class AutocompleteTests(unittest.TestCase):
         req['seq'] = ANY
 
         backend.send_request.assert_called_with(req)
-        # print(backend.send_request.ca)
 
 
 
-class HighlightErrorsTests(unittest.TestCase):
+class HandleResponseTests(unittest.TestCase):
 
-    def test_highlight_error(self):
-        pass
+    def test_handle_welcome_stack_ide_outdated(self):
+        view = mock_view()
+        backend = MagicMock()
 
+        welcome = {
+                  "tag": "ResponseWelcome",
+                  "contents": [0, 0, 0]
+                  }
+
+        # backend = FakeBackend(response)
+        instance = stackide.StackIDE(view.window(), backend)
+        instance.handle_response(welcome)
+        self.assertEqual(sublime.current_error, "Please upgrade stack-ide to a newer version.")
+
+    def test_handle_update_progress(self):
+        view = mock_view()
+        backend = MagicMock()
+        message = "Compiling (1/3) Main.hs"
+        progress = {
+                  "tag": "ResponseUpdateSession",
+                  "contents": {
+                    "progressParsedMsg": message
+                    }
+                  }
+
+        # backend = FakeBackend(response)
+        instance = stackide.StackIDE(view.window(), backend)
+        instance.handle_response(progress)
+        self.assertEqual(sublime.current_status, message)
 
 
 if __name__ == '__main__':
