@@ -25,6 +25,10 @@ many_completions = {'tag': 'ResponseGetAutocompletion', 'contents': [{'idProp': 
 someFunc_span_info = {'contents': [[{'contents': {'idProp': {'idDefinedIn': {'moduleName': 'Lib', 'modulePackage': {'packageVersion': None, 'packageName': 'main', 'packageKey': 'main'}}, 'idSpace': 'VarName', 'idType': 'IO ()', 'idDefSpan': {'contents': {'spanFromLine': 9, 'spanFromColumn': 1, 'spanToColumn': 9, 'spanFilePath': 'src/Lib.hs', 'spanToLine': 9}, 'tag': 'ProperSpan'}, 'idName': 'someFunc', 'idHomeModule': None}, 'idScope': {'idImportQual': '', 'idImportedFrom': {'moduleName': 'Lib', 'modulePackage': {'packageVersion': None, 'packageName': 'main', 'packageKey': 'main'}}, 'idImportSpan': {'contents': {'spanFromLine': 3, 'spanFromColumn': 1, 'spanToColumn': 11, 'spanFilePath': 'app/Main.hs', 'spanToLine': 3}, 'tag': 'ProperSpan'}, 'tag': 'Imported'}}, 'tag': 'SpanId'}, {'spanFromLine': 7, 'spanFromColumn': 27, 'spanToColumn': 35, 'spanFilePath': 'app/Main.hs', 'spanToLine': 7}]], 'seq': '724752c9-a7bf-4658-834a-3ff7df64e7e5', 'tag': 'ResponseGetSpanInfo'}
 putStrLn_span_info = {'contents': [[{'contents': {'idProp': {'idDefinedIn': {'moduleName': 'System.IO', 'modulePackage': {'packageVersion': '4.8.1.0', 'packageName': 'base', 'packageKey': 'base'}}, 'idSpace': 'VarName', 'idType': 'String -> IO ()', 'idDefSpan': {'contents': '<no location info>', 'tag': 'TextSpan'}, 'idName': 'putStrLn', 'idHomeModule': {'moduleName': 'System.IO', 'modulePackage': {'packageVersion': '4.8.1.0', 'packageName': 'base', 'packageKey': 'base'}}}, 'idScope': {'idImportQual': '', 'idImportedFrom': {'moduleName': 'Prelude', 'modulePackage': {'packageVersion': '4.8.1.0', 'packageName': 'base', 'packageKey': 'base'}}, 'idImportSpan': {'contents': {'spanFromLine': 1, 'spanFromColumn': 8, 'spanToColumn': 12, 'spanFilePath': 'app/Main.hs', 'spanToLine': 1}, 'tag': 'ProperSpan'}, 'tag': 'Imported'}}, 'tag': 'SpanId'}, {'spanFromLine': 7, 'spanFromColumn': 41, 'spanToColumn': 49, 'spanFilePath': 'app/Main.hs', 'spanToLine': 7}]], 'seq': '6ee8d949-82bd-491d-8b79-ffcaa3e65fde', 'tag': 'ResponseGetSpanInfo'}
 readFile_exp_types = {'tag': 'ResponseGetExpTypes', 'contents': [['FilePath -> IO String', {'spanToColumn': 25, 'spanToLine': 10, 'spanFromColumn': 17, 'spanFromLine': 10, 'spanFilePath': 'src/Lib.hs'}], ['IO String', {'spanToColumn': 36, 'spanToLine': 10, 'spanFromColumn': 17, 'spanFromLine': 10, 'spanFilePath': 'src/Lib.hs'}], ['IO ()', {'spanToColumn': 28, 'spanToLine': 11, 'spanFromColumn': 12, 'spanFromLine': 9, 'spanFilePath': 'src/Lib.hs'}]], 'seq': 'fd3eb2a5-e390-4ad7-be72-8b2e82441a95'}
+status_progress_1 = {'contents': {'contents': {'progressParsedMsg': 'Compiling Lib', 'progressNumSteps': 2, 'progressStep': 1, 'progressOrigMsg': '[1 of 2] Compiling Lib              ( /Users/tomv/Projects/Personal/haskell/helloworld/src/Lib.hs, interpreted )'}, 'tag': 'UpdateStatusProgress'}, 'tag': 'ResponseUpdateSession'}
+status_progress_2 = {'contents': {'contents': {'progressParsedMsg': 'Compiling Main', 'progressNumSteps': 2, 'progressStep': 2, 'progressOrigMsg': '[2 of 2] Compiling Main             ( /Users/tomv/Projects/Personal/haskell/helloworld/app/Main.hs, interpreted )'}, 'tag': 'UpdateStatusProgress'}, 'tag': 'ResponseUpdateSession'}
+status_progress_done = {'contents': {'contents': [], 'tag': 'UpdateStatusDone'}, 'tag': 'ResponseUpdateSession'}
+
 
 stackide.Log.verbosity = stackide.Log.VERB_ERROR
 cur_dir = os.path.dirname(os.path.realpath(__file__))
@@ -102,7 +106,10 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(None, prop.type)
         self.assertEqual('Data.List', scope.importedFrom.module)
 
-
+    def test_parse_update_session(self):
+        self.assertEqual('Compiling Lib', stackide.parse_update_session(status_progress_1.get('contents')))
+        self.assertEqual('Compiling Main', stackide.parse_update_session(status_progress_2.get('contents')))
+        self.assertEqual('Done.', stackide.parse_update_session(status_progress_done.get('contents')))
 
 class SupervisorTests(unittest.TestCase):
 
@@ -206,27 +213,27 @@ class LaunchTests(unittest.TestCase):
     # the null object should contain the reason why the launch failed.
 
     def test_launch_window_without_folder(self):
-        instance = stackide.launch_stack_ide(mock_window([]))
+        instance = stackide.configure_instance(mock_window([]))
         self.assertIsInstance(instance, stackide.NoStackIDE)
         self.assertRegex(instance.reason, "No folder to monitor.*")
 
     def test_launch_window_with_empty_folder(self):
         cur_dir = os.path.dirname(os.path.realpath(__file__))
-        instance = stackide.launch_stack_ide(
+        instance = stackide.configure_instance(
             mock_window([cur_dir + '/mocks/empty_project']))
         self.assertIsInstance(instance, stackide.NoStackIDE)
         self.assertRegex(instance.reason, "No cabal file found.*")
 
     def test_launch_window_with_cabal_folder(self):
         cur_dir = os.path.dirname(os.path.realpath(__file__))
-        instance = stackide.launch_stack_ide(
+        instance = stackide.configure_instance(
             mock_window([cur_dir + '/mocks/cabal_project']))
         self.assertIsInstance(instance, stackide.NoStackIDE)
         self.assertRegex(instance.reason, "No stack.yaml in path.*")
 
     def test_launch_window_with_wrong_cabal_file(self):
         cur_dir = os.path.dirname(os.path.realpath(__file__))
-        instance = stackide.launch_stack_ide(
+        instance = stackide.configure_instance(
             mock_window([cur_dir + '/mocks/cabalfile_wrong_project']))
         self.assertIsInstance(instance, stackide.NoStackIDE)
         self.assertRegex(
@@ -235,7 +242,7 @@ class LaunchTests(unittest.TestCase):
     # slow!
     def test_launch_window_with_helloworld_project(self):
         cur_dir = os.path.dirname(os.path.realpath(__file__))
-        instance = stackide.launch_stack_ide(
+        instance = stackide.configure_instance(
             mock_window([cur_dir + '/mocks/helloworld']))
         self.assertIsInstance(instance, stackide.StackIDE)
         instance.end()
@@ -328,9 +335,17 @@ class UtilTests(unittest.TestCase):
         view.window.return_value = window
         view.file_name = Mock()
         view.file_name.return_value = cur_dir + '/mocks/helloworld/Setup.hs'
-        # calls view.window() , first_folder calls window.folders()
-        # calls view.file_name()
         self.assertEqual('Setup.hs', stackide.relative_view_file_name(view))
+
+    def test_complaints_not_repeated(self):
+        stackide.complain('complaint', 'waaaah')
+        self.assertEqual(sublime.current_error, 'waaaah')
+        stackide.complain('complaint', 'waaaah 2')
+        self.assertEqual(sublime.current_error, 'waaaah')
+        stackide.reset_complaints()
+        stackide.complain('complaint', 'waaaah 2')
+        self.assertEqual(sublime.current_error, 'waaaah 2')
+
 
 
 class CommandTests(unittest.TestCase):
@@ -365,11 +380,13 @@ class CommandTests(unittest.TestCase):
         backend = FakeBackend(response)
         instance = stackide.StackIDE(cmd.view.window(), backend)
         backend.handler = instance.handle_response
-
-        stackide.StackIDE.ide_backend_instances[
+        stackide.supervisor = stackide.Supervisor(monitor=False)
+        stackide.supervisor.window_instances[
             cmd.view.window().id()] = instance
+
         cmd.run(None)
         cmd.view.show_popup.assert_called_with(type_info)
+        stackide.supervisor = None
 
     def test_can_copy_type_at_cursor(self):
         cmd = stackide.CopyHsTypeAtCursorCommand()
@@ -389,10 +406,13 @@ class CommandTests(unittest.TestCase):
         instance = stackide.StackIDE(cmd.view.window(), backend)
         backend.handler = instance.handle_response
 
-        stackide.StackIDE.ide_backend_instances[
+        stackide.supervisor = stackide.Supervisor(monitor=False)
+        stackide.supervisor.window_instances[
             cmd.view.window().id()] = instance
+
         cmd.run(None)
         self.assertEqual(sublime.clipboard, type_info)
+        stackide.supervisor = None
 
     def test_can_request_show_info_at_cursor(self):
         cmd = stackide.ShowHsInfoAtCursorCommand()
@@ -404,10 +424,13 @@ class CommandTests(unittest.TestCase):
         instance = stackide.StackIDE(cmd.view.window(), backend)
         backend.handler = instance.handle_response
 
-        stackide.StackIDE.ide_backend_instances[cmd.view.window().id()] = instance
+        stackide.supervisor = stackide.Supervisor(monitor=False)
+        stackide.supervisor.window_instances[
+            cmd.view.window().id()] = instance
+
         cmd.run(None)
         cmd.view.show_popup.assert_called_with("someFunc :: IO ()  (Defined in src/Lib.hs:9:1)")
-
+        stackide.supervisor = None
 
     def test_show_info_from_module(self):
         cmd = stackide.ShowHsInfoAtCursorCommand()
@@ -418,25 +441,32 @@ class CommandTests(unittest.TestCase):
         instance = stackide.StackIDE(cmd.view.window(), backend)
         backend.handler = instance.handle_response
 
-        stackide.StackIDE.ide_backend_instances[cmd.view.window().id()] = instance
+        stackide.supervisor = stackide.Supervisor(monitor=False)
+        stackide.supervisor.window_instances[
+            cmd.view.window().id()] = instance
+
         cmd.run(None)
         cmd.view.show_popup.assert_called_with("putStrLn :: String -> IO ()  (Imported from Prelude)")
+        stackide.supervisor = None
 
     def test_goto_definition_at_cursor(self):
         global cur_dir
         cmd = stackide.GotoDefinitionAtCursorCommand()
         cmd.view = mock_view()
         cmd.view.show_popup = Mock()
-        # response = {"tag": "", "contents": [[{"contents": someFunc_span_info}, {}]]}
         backend = FakeBackend(someFunc_span_info)
         window = cmd.view.window()
         window.open_file = Mock()
         instance = stackide.StackIDE(window, backend)
         backend.handler = instance.handle_response
 
-        stackide.StackIDE.ide_backend_instances[cmd.view.window().id()] = instance
+        stackide.supervisor = stackide.Supervisor(monitor=False)
+        stackide.supervisor.window_instances[
+            cmd.view.window().id()] = instance
+
         cmd.run(None)
         window.open_file.assert_called_with(cur_dir + "/mocks/helloworld/src/Lib.hs:9:1", sublime.ENCODED_POSITION)
+        stackide.supervisor = None
 
     def test_goto_definition_of_module(self):
         global cur_dir
@@ -457,13 +487,16 @@ class ListenerTests(unittest.TestCase):
         backend = MagicMock()
         window = view.window()
         instance = stackide.StackIDE(window, backend)
-        stackide.StackIDE.ide_backend_instances[window.id()] = instance
+        stackide.supervisor = stackide.Supervisor(monitor=False)
+        stackide.supervisor.window_instances[
+            view.window().id()] = instance
         backend.send_request = Mock()
 
         listener.on_post_save(view)
 
         backend.send_request.assert_any_call(stackide.StackIDE.Req.update_session())
         # backend.send_request.assert_called_with(stackide.StackIDE.Req.get_source_errors())
+        stackide.supervisor = None
 
     def test_type_at_cursor_tests(self):
         listener = stackide.StackIDETypeAtCursorHandler()
@@ -481,13 +514,14 @@ class ListenerTests(unittest.TestCase):
         backend = FakeBackend(response)
         instance = stackide.StackIDE(view.window(), backend)
         backend.handler = instance.handle_response
-        stackide.StackIDE.ide_backend_instances[
+        stackide.supervisor = stackide.Supervisor(monitor=False)
+        stackide.supervisor.window_instances[
             view.window().id()] = instance
 
         listener.on_selection_modified(view)
         view.set_status.assert_called_with("type_at_cursor", type_info)
         view.add_regions.assert_called_with("type_at_cursor", ANY, "storage.type", "", sublime.DRAW_OUTLINED)
-
+        stackide.supervisor = None
 
 class WinTests(unittest.TestCase):
 
@@ -576,28 +610,11 @@ class AutocompleteTests(unittest.TestCase):
     def test_request_completions(self):
         view = mock_view()
         listener = stackide.StackIDEAutocompleteHandler()
-
-        type_info = "YOLO -> Ded"
-        completion = {
-            "idScope": {
-                "idImportedFrom" : {
-                    "moduleName" : "Data.List"
-                }
-            },
-            "idProp": {
-                "idType" : "[a] -> a",
-                "idName" : "head"
-            }
-        }
-
-        # response = {"tag": "", "contents": [completion]}
-
         backend = MagicMock()
 
-        # backend = FakeBackend(response)
         instance = stackide.StackIDE(view.window(), backend)
-        # backend.handler = instance.handle_response
-        stackide.StackIDE.ide_backend_instances[
+        stackide.supervisor = stackide.Supervisor(monitor=False)
+        stackide.supervisor.window_instances[
             view.window().id()] = instance
 
         view.settings().get = Mock(return_value=False)
@@ -607,7 +624,7 @@ class AutocompleteTests(unittest.TestCase):
         req['seq'] = ANY
 
         backend.send_request.assert_called_with(req)
-
+        stackide.supervisor = None
 
 
 class HandleResponseTests(unittest.TestCase):
@@ -625,22 +642,6 @@ class HandleResponseTests(unittest.TestCase):
         instance = stackide.StackIDE(view.window(), backend)
         instance.handle_response(welcome)
         self.assertEqual(sublime.current_error, "Please upgrade stack-ide to a newer version.")
-
-    def test_handle_update_progress(self):
-        view = mock_view()
-        backend = MagicMock()
-        message = "Compiling (1/3) Main.hs"
-        progress = {
-                  "tag": "ResponseUpdateSession",
-                  "contents": {
-                    "progressParsedMsg": message
-                    }
-                  }
-
-        # backend = FakeBackend(response)
-        instance = stackide.StackIDE(view.window(), backend)
-        instance.handle_response(progress)
-        self.assertEqual(sublime.current_status, message)
 
 
 if __name__ == '__main__':

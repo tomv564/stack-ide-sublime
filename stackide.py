@@ -44,7 +44,9 @@ class Supervisor():
 
     def __init__(self, monitor=True):
         self.settings = sublime.load_settings("SublimeStackIDE.sublime-settings")
-        Log.normal("Starting Supervisor")
+        verbosity = self.settings.get('verbosity', 'normal')
+        Log.set_verbosity(verbosity)
+        Log.normal("Starting Supervisor, verbosity=" + verbosity)
         self.window_instances = {}
         self.monitor = monitor
         self.timer = None
@@ -87,12 +89,24 @@ class Supervisor():
         # The windows remaining in current_windows are new, so they have no instance.
         # We try to create one for them
         for window in current_windows.values():
-            self.window_instances[window.id()] = launch_stack_ide(window)
+            self.window_instances[window.id()] = configure_instance(window)
 
         # schedule next run.
         if self.monitor:
             self.timer = threading.Timer(1.0, self.check_instances)
             self.timer.start()
+
+    def is_running(self, window):
+        if not window:
+            return False
+        return self.for_window(window) is not None
+
+    def for_window(self, window):
+        instance = self.window_instances.get(window.id())
+        if instance and not instance.is_active:
+            instance = None
+
+        return instance
 
     def shutdown(self):
         #todo: make sure processes are killed?
@@ -146,8 +160,8 @@ def send_request(window, request, on_response = None):
     Sends the given request to the (view's) window's stack-ide instance,
     optionally handling its response
     """
-    if StackIDE.is_running(window):
-        StackIDE.for_window(window).send_request(request, on_response)
+    if supervisor.is_running(window):
+        supervisor.for_window(window).send_request(request, on_response)
 
 def get_view_selection(view):
     region = view.sel()[0]
@@ -177,30 +191,30 @@ def view_region_from_span(view, span):
     return sublime.Region(from_point, to_point)
 
 
-def launch_stack_ide(window):
+def configure_instance(window):
     """
-    Launches a Stack IDE process for the current window if possible
+    Creates a NoStackIDE or a StackIDE instance for a window.
     """
     folder = first_folder(window)
 
     if not folder:
         msg = "No folder to monitor for window " + str(window.id())
-        Log.normal(msg)
+        Log.normal("Window {}: {}".format(str(window.id()), msg))
         instance = NoStackIDE(msg)
 
     elif not has_cabal_file(folder):
         msg = "No cabal file found in " + folder
-        Log.normal(msg)
+        Log.normal("Window {}: {}".format(str(window.id()), msg))
         instance = NoStackIDE(msg)
 
     elif not os.path.isfile(expected_cabalfile(folder)):
         msg = "Expected cabal file " + expected_cabalfile(folder) + " not found"
-        Log.warning(msg)
+        Log.normal("Window {}: {}".format(str(window.id()), msg))
         instance = NoStackIDE(msg)
 
     elif not is_stack_project(folder):
         msg = "No stack.yaml in path " + folder
-        Log.warning(msg)
+        Log.warning("Window {}: {}".format(str(window.id()), msg))
         instance = NoStackIDE(msg)
 
         # TODO: We should also support single files, which should get their own StackIDE instance
@@ -208,10 +222,8 @@ def launch_stack_ide(window):
 
     else:
         try:
-            # If everything looks OK, launch a StackIDE instance
-            Log.normal("Initializing window", window.id())
-
             # not clear how constructing an instance should throw a FileNotFoundError
+            Log.normal("Window {}: Launching stack ide at path {}".format(str(window.id()), folder))
             instance = StackIDE(window)
         except FileNotFoundError as e:
             instance = NoStackIDE("instance init failed -- stack not found")
@@ -229,7 +241,7 @@ def launch_stack_ide(window):
     # Kick off the process by sending an initial request. We use another thread
     # to avoid any accidental blocking....
     def kick_off():
-      Log.normal("Kicking off window", window.id())
+      Log.debug("Kicking off window", window.id())
       send_request(window,
         request     = StackIDE.Req.get_source_errors(),
         on_response = Win(window).highlight_errors
@@ -363,6 +375,16 @@ def parse_autocompletions(contents):
     return ((parse_idprop(item.get('idProp')),
             parse_idscope(item.get('idScope'))) for item in contents)
 
+def parse_update_session(contents):
+    """
+    Converts a ResponseUpdateSession message to a single status string
+    """
+    tag = contents.get('tag')
+    if tag == "UpdateStatusProgress":
+        progress = contents.get('contents')
+        return str(progress.get("progressParsedMsg"))
+    elif tag == "UpdateStatusDone":
+        return "Done."
 
 def parse_source_errors(contents):
     """
@@ -508,7 +530,7 @@ class StackIDESaveListener(sublime_plugin.EventListener):
     """
     def on_post_save(self, view):
         window = view.window()
-        if not StackIDE.is_running(window):
+        if not supervisor.is_running(window):
             return
 
         # This works to load the saved file into stack-ide, but since it doesn't the include dirs
@@ -533,7 +555,7 @@ class StackIDETypeAtCursorHandler(sublime_plugin.EventListener):
         if not view:
             return
         window = view.window()
-        if not StackIDE.is_running(window):
+        if not supervisor.is_running(window):
             return
         # Only try to get types for views into files
         # (rather than e.g. the find field or the console pane)
@@ -557,7 +579,7 @@ class StackIDEAutocompleteHandler(sublime_plugin.EventListener):
     def on_query_completions(self, view, prefix, locations):
 
         window = view.window()
-        if not StackIDE.is_running(window):
+        if not supervisor.is_running(window):
             return
         # Check if this completion query is due to our refreshing the completions list
         # after receiving a response from stack-ide, and if so, don't send
@@ -613,7 +635,7 @@ class SendStackIdeRequestCommand(sublime_plugin.WindowCommand):
         Pass a request to stack-ide.
         Called via run_command("send_stack_ide_request", {"request":})
         """
-        instance = StackIDE.for_window(self.window)
+        instance = supervisor.for_window(self.window)
         if instance:
             instance.send_request(request)
 
@@ -707,7 +729,6 @@ def boot_ide_backend(path, response_handler):
     """
     Start up a stack-ide subprocess for the window, and a thread to consume its stdout.
     """
-    Log.normal("Launching stack-ide instance for ", path)
 
     # Assumes the library target name is the same as the project dir
     (project_in, project_name) = os.path.split(path)
@@ -727,6 +748,21 @@ def boot_ide_backend(path, response_handler):
 
     return JsonProcessBackend(process, response_handler)
 
+
+complaints_shown = set()
+def complain(id, text):
+    """
+    Show the msg as an error message (on a modal pop-up). The complaint_id is
+    used to decide when we have already complained about something, so that
+    we don't do it again (until reset)
+    """
+    if id not in complaints_shown:
+        complaints_shown.add(id)
+        sublime.error_message(text)
+
+def reset_complaints():
+    global complaints_shown
+    complaints_shown = set()
 
 class StackIDE:
     ide_backend_instances = {}
@@ -763,20 +799,6 @@ class StackIDE:
         def get_shutdown():
             return { "tag": "RequestShutdownSession", "contents":[]}
 
-    @classmethod
-    def is_running(cls, window):
-        if not window:
-            return False
-        return StackIDE.for_window(window) is not None
-
-
-    @classmethod
-    def for_window(cls, window):
-        instance = StackIDE.ide_backend_instances.get(window.id())
-        if instance and not instance.is_active:
-            instance = None
-
-        return instance
 
     @classmethod
     def kill_all(cls):
@@ -791,20 +813,7 @@ class StackIDE:
         """
         Log.normal("Resetting StackIDE")
         cls.kill_all()
-        cls.complaints_shown = set()
-
-
-    @classmethod
-    def complain(cls,complaint_id,msg):
-       """
-       Show the msg as an error message (on a modal pop-up). The complaint_id is
-       used to decide when we have already complained about something, so that
-       we don't do it again (until reset)
-       """
-       if complaint_id not in cls.complaints_shown:
-           cls.complaints_shown.add(complaint_id)
-           sublime.error_message(msg)
-
+        reset_complaints()
 
     def __init__(self, window, backend=None):
         self.window = window
@@ -853,41 +862,58 @@ class StackIDE:
         """
         Handles JSON responses from the backend
         """
-        # Log.debug("Got response: ", data)
+        #Log.debug("Got response: ", data)
 
-        response = data.get("tag")
+        tag = data.get("tag")
         contents = data.get("contents")
-        seq_id   = data.get("seq")
+        seq_id = data.get("seq")
 
         if seq_id is not None:
-            handler = self.conts.get(seq_id)
-            del self.conts[seq_id]
-            if handler is not None:
-                if contents is not None:
-                    sublime.set_timeout(lambda:handler(contents), 0)
-            else:
-                Log.warning("Handler not found for seq", seq_id)
-        # Check that stack-ide talks a version of the protocal we understand
-        elif response == "ResponseWelcome":
-            expected_version = (0,1,1)
-            version_got = tuple(contents) if type(contents) is list else contents
-            if expected_version > version_got:
-                Log.error("Old stack-ide protocol:", version_got, '\n', 'Want version:', expected_version)
-                StackIDE.complain("wrong-stack-ide-version",
-                    "Please upgrade stack-ide to a newer version.")
-            elif expected_version < version_got:
-                Log.warning("stack-ide protocol may have changed:", version_got)
-            else:
-                Log.debug("stack-ide protocol version:", version_got)
-        # # Pass progress messages to the status bar
-        elif response == "ResponseUpdateSession":
-            if contents != None:
-                progressMessage = contents.get("progressParsedMsg")
-                if progressMessage:
-                    sublime.status_message(progressMessage)
+            self._send_to_handler(seq_id, contents)
+
+        elif tag == "ResponseWelcome":
+            self._handle_welcome(contents)
+
+        elif tag == "ResponseUpdateSession":
+            self._handle_update_session(contents)
+
+        elif tag == "ResponseLog":
+            Log.debug(contents.rstrip())
+
         else:
             Log.normal("Unhandled response: ", data)
 
+    def _send_to_handler(self, seq_id, contents):
+        handler = self.conts.get(seq_id)
+        del self.conts[seq_id]
+        if handler is not None:
+            if contents is not None:
+                sublime.set_timeout(lambda:handler(contents), 0)
+        else:
+            Log.warning("Handler not found for seq", seq_id)
+
+    def _handle_welcome(self, welcome):
+        """
+        Check that stack-ide talks a version of the protocal we understand
+        """
+        expected_version = (0, 1, 1)
+        version_got = tuple(welcome) if type(welcome) is list else welcome
+        if expected_version > version_got:
+            Log.error("Old stack-ide protocol:", version_got, '\n', 'Want version:', expected_version)
+            complain("wrong-stack-ide-version",
+                "Please upgrade stack-ide to a newer version.")
+        elif expected_version < version_got:
+            Log.warning("stack-ide protocol may have changed:", version_got)
+        else:
+            Log.debug("stack-ide protocol version:", version_got)
+
+    def _handle_update_session(self, update_session):
+        """
+        Show a status message for session progress updates.
+        """
+        msg = parse_update_session(update_session)
+        if msg:
+            sublime.status_message(msg)
 
     def __del__(self):
         if self.process:
@@ -936,7 +962,7 @@ class Win:
         if types:
             # Display the first type in a region and in the status bar
             view = self.window.active_view()
-            (type, span) = types[0] # type_info_for_sel(view, types)
+            (type, span) = types[0]
             if span:
                 if Settings.show_popup():
                     view.show_popup(type)
@@ -1102,11 +1128,11 @@ class Log:
   @classmethod
   def _record(cls, verb, *msg):
       if not Log.verbosity:
-          Log.set_verbosity("debug")
+          Log.set_verbosity("normal")
 
       if verb <= Log.verbosity:
           for line in ''.join(map(lambda x: str(x), msg)).split('\n'):
-              print('SublimeStackIDE ['+cls._show_verbosity(verb)+']:', msg)
+              print('SublimeStackIDE ['+cls._show_verbosity(verb)+']:', line)
 
           if verb == Log.VERB_ERROR:
               sublime.status_message('There were errors, check the console log')

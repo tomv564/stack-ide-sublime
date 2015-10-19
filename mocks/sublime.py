@@ -17,8 +17,8 @@ def set_timeout_async(fn, delay):
 def set_timeout(fn, delay):
     fn()
 
-def load_settings():
-    pass
+def load_settings(name):
+    return {}
 
 
 # class FakeBackend():
