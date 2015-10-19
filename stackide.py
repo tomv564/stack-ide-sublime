@@ -33,12 +33,6 @@ def plugin_unloaded():
     global supervisor
     supervisor.shutdown()
     supervisor = None
-    # global watchdog
-    # watchdog.kill()
-    # StackIDE.reset()
-    # Log.reset()
-    # Settings.reset()
-    # watchdog = None
 
 class Supervisor():
 
@@ -108,8 +102,13 @@ class Supervisor():
 
         return instance
 
+    def _end_instances(self):
+        # Log.normal("Killing all stack-ide-sublime instances:", {k:str(v) for k,v in StackIDE.ide_backend_instances.items()})
+        for instance in self.window_instances.values():
+            instance.end()
+
     def shutdown(self):
-        #todo: make sure processes are killed?
+        self._end_instances()
         if self.timer:
             self.timer.cancel()
 
@@ -228,7 +227,7 @@ def configure_instance(window):
         except FileNotFoundError as e:
             instance = NoStackIDE("instance init failed -- stack not found")
             Log.error(e)
-            cls.complain('stack-not-found',
+            complain('stack-not-found',
                 "Could not find program 'stack'!\n\n"
                 "Make sure that 'stack' and 'stack-ide' are both installed. "
                 "If they are not on the system path, edit the 'add_to_PATH' "
@@ -243,7 +242,7 @@ def configure_instance(window):
     def kick_off():
       Log.debug("Kicking off window", window.id())
       send_request(window,
-        request     = StackIDE.Req.get_source_errors(),
+        request     = Requests.get_source_errors(),
         on_response = Win(window).highlight_errors
       )
     if not isinstance(instance, NoStackIDE):
@@ -275,7 +274,7 @@ class ShowHsTypeAtCursorCommand(sublime_plugin.TextCommand):
     expression under the cursor and, if available, shows it as a pop-up.
     """
     def run(self,edit):
-        request = StackIDE.Req.get_exp_types(span_from_view_selection(self.view))
+        request = Requests.get_exp_types(span_from_view_selection(self.view))
         send_request(self.view.window(), request, self._handle_response)
 
     def _handle_response(self,response):
@@ -291,7 +290,7 @@ class ShowHsInfoAtCursorCommand(sublime_plugin.TextCommand):
     expression under the cursor and, if available, shows it as a pop-up.
     """
     def run(self,edit):
-        request = StackIDE.Req.get_exp_info(span_from_view_selection(self.view))
+        request = Requests.get_exp_info(span_from_view_selection(self.view))
         send_request(self.view.window(), request, self._handle_response)
 
     def _handle_response(self,response):
@@ -318,7 +317,7 @@ class GotoDefinitionAtCursorCommand(sublime_plugin.TextCommand):
     expression under the cursor and, if available, navigates to its location
     """
     def run(self,edit):
-        request = StackIDE.Req.get_exp_info(span_from_view_selection(self.view))
+        request = Requests.get_exp_info(span_from_view_selection(self.view))
         send_request(self.view.window() ,request, self._handle_response)
 
     def _handle_response(self,response):
@@ -345,7 +344,7 @@ class CopyHsTypeAtCursorCommand(sublime_plugin.TextCommand):
     expression under the cursor and, if available, puts it in the clipboard.
     """
     def run(self,edit):
-        request = StackIDE.Req.get_exp_types(span_from_view_selection(self.view))
+        request = Requests.get_exp_types(span_from_view_selection(self.view))
         send_request(self.view.window(), request, self._handle_response)
 
     def _handle_response(self,response):
@@ -543,8 +542,8 @@ class StackIDESaveListener(sublime_plugin.EventListener):
         #           }
         #         ]
         #     }
-        send_request(window, StackIDE.Req.update_session())
-        send_request(window, StackIDE.Req.get_source_errors(), Win(window).highlight_errors)
+        send_request(window, Requests.update_session())
+        send_request(window, Requests.get_source_errors(), Win(window).highlight_errors)
 
 class StackIDETypeAtCursorHandler(sublime_plugin.EventListener):
     """
@@ -562,7 +561,7 @@ class StackIDETypeAtCursorHandler(sublime_plugin.EventListener):
         if view.file_name():
             # Uncomment to see the scope at the cursor:
             # Log.debug(view.scope_name(view.sel()[0].begin()))
-            request = StackIDE.Req.get_exp_types(span_from_view_selection(view))
+            request = Requests.get_exp_types(span_from_view_selection(view))
             send_request(window, request, Win(window).highlight_type)
 
 
@@ -586,7 +585,7 @@ class StackIDEAutocompleteHandler(sublime_plugin.EventListener):
         # another request for completions.
         if not self.refreshing:
             self.view = view
-            request = StackIDE.Req.get_autocompletion(filepath=relative_view_file_name(view),prefix=prefix)
+            request = Requests.get_autocompletion(filepath=relative_view_file_name(view),prefix=prefix)
             send_request(window, request, self._handle_response)
 
         # Clear the flag to allow future completion queries
@@ -689,12 +688,16 @@ class JsonProcessBackend:
         Reads any errors from the stack-ide process.
         """
         while self._process.poll() is None:
+
             try:
-                Log.warning("Stack-IDE error: ", self._process.stderr.readline().decode('UTF-8'))
+                error = self._process.stderr.readline().decode('UTF-8')
+                if len(error) > 0:
+                    Log.warning("Stack-IDE error: ", error)
             except:
                 Log.error("Stack-IDE stderr process ending due to exception: ", sys.exc_info())
-                return;
-        Log.normal("Stack-IDE stderr process ended.")
+                return
+
+        Log.debug("Stack-IDE stderr process ended.")
 
     def read_stdout(self):
         """
@@ -721,9 +724,10 @@ class JsonProcessBackend:
                 Log.warning("Stack-IDE stdout process ending due to exception: ", sys.exc_info())
                 self._process.terminate()
                 self._process = None
-                return;
+                return
 
         Log.normal("Stack-IDE stdout process ended.")
+
 
 def boot_ide_backend(path, response_handler):
     """
@@ -737,7 +741,7 @@ def boot_ide_backend(path, response_handler):
     alt_env = os.environ.copy()
     add_to_PATH = Settings.add_to_PATH()
     if len(add_to_PATH) > 0:
-      alt_env["PATH"] = os.pathsep.join(add_to_PATH + [alt_env.get("PATH","")])
+        alt_env["PATH"] = os.pathsep.join(add_to_PATH + [alt_env.get("PATH","")])
 
     Log.debug("Calling stack with PATH:", alt_env['PATH'] if alt_env else os.environ['PATH'])
 
@@ -764,56 +768,39 @@ def reset_complaints():
     global complaints_shown
     complaints_shown = set()
 
+
+class Requests:
+
+    @staticmethod
+    def update_session():
+        return { "tag":"RequestUpdateSession", "contents": []}
+
+    @staticmethod
+    def get_source_errors():
+        return {"tag": "RequestGetSourceErrors", "contents": []}
+
+    @staticmethod
+    def get_exp_types(exp_span):
+        return { "tag": "RequestGetExpTypes", "contents": exp_span}
+
+    @staticmethod
+    def get_exp_info(exp_span):
+        return { "tag": "RequestGetSpanInfo", "contents": exp_span}
+
+    @staticmethod
+    def get_autocompletion(filepath,prefix):
+        return {
+            "tag":"RequestGetAutocompletion",
+            "contents": [
+                    filepath,
+                    prefix
+                ]
+            }
+    @staticmethod
+    def get_shutdown():
+        return { "tag": "RequestShutdownSession", "contents":[]}
+
 class StackIDE:
-    ide_backend_instances = {}
-    complaints_shown = set()
-
-    class Req:
-
-        @staticmethod
-        def update_session():
-            return { "tag":"RequestUpdateSession", "contents": []}
-
-        @staticmethod
-        def get_source_errors():
-            return {"tag": "RequestGetSourceErrors", "contents": []}
-
-        @staticmethod
-        def get_exp_types(exp_span):
-            return { "tag": "RequestGetExpTypes", "contents": exp_span}
-
-        @staticmethod
-        def get_exp_info(exp_span):
-            return { "tag": "RequestGetSpanInfo", "contents": exp_span}
-
-        @staticmethod
-        def get_autocompletion(filepath,prefix):
-            return {
-                "tag":"RequestGetAutocompletion",
-                "contents": [
-                        filepath,
-                        prefix
-                    ]
-                }
-        @staticmethod
-        def get_shutdown():
-            return { "tag": "RequestShutdownSession", "contents":[]}
-
-
-    @classmethod
-    def kill_all(cls):
-        Log.normal("Killing all stack-ide-sublime instances:", {k:str(v) for k,v in StackIDE.ide_backend_instances.items()})
-        for instance in StackIDE.ide_backend_instances.values():
-            instance.end()
-
-    @classmethod
-    def reset(cls):
-        """
-        Kill all instances, and forget about previous notifications.
-        """
-        Log.normal("Resetting StackIDE")
-        cls.kill_all()
-        reset_complaints()
 
     def __init__(self, window, backend=None):
         self.window = window
@@ -847,10 +834,10 @@ class StackIDE:
         """
         Ask stack-ide to shut down.
         """
-        self.send_request(self.Req.get_shutdown())
-        self.die()
+        self.send_request(Requests.get_shutdown())
+        self._die()
 
-    def die(self):
+    def _die(self):
         """
         Mark the instance as no longer alive
         """
@@ -879,6 +866,9 @@ class StackIDE:
 
         elif tag == "ResponseLog":
             Log.debug(contents.rstrip())
+
+        elif tag == "ResponseShutdownSession":
+            Log.debug("Stack-ide process has shut down")
 
         else:
             Log.normal("Unhandled response: ", data)
@@ -914,16 +904,6 @@ class StackIDE:
         msg = parse_update_session(update_session)
         if msg:
             sublime.status_message(msg)
-
-    def __del__(self):
-        if self.process:
-            try:
-                self.process.terminate()
-            except ProcessLookupError:
-                # it was already done...
-                pass
-            finally:
-                self.process = None
 
 
 class NoStackIDE:

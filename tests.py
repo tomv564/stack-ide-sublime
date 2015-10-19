@@ -1,15 +1,14 @@
 import unittest
 import os
-from unittest.mock import MagicMock, Mock, ANY
-import stackide
-from mocks import sublime
+from unittest.mock import MagicMock, Mock, ANY, patch
+from . import stackide
+from .mocks import sublime
 
 # SETUP:
 # create a virtualenv for python 3.
 # sudo pip install magicmock==1.0.1
 
 # TODO:
-# Clean up static methods on StackIDE and rename to something appropriate (dispatcher?)
 # Determine if Settings and Log can be injected/configured from Supervisor
 # PEP8 tests and split out files.
 # Look at Tern_for_sublime's implementation.
@@ -28,7 +27,6 @@ readFile_exp_types = {'tag': 'ResponseGetExpTypes', 'contents': [['FilePath -> I
 status_progress_1 = {'contents': {'contents': {'progressParsedMsg': 'Compiling Lib', 'progressNumSteps': 2, 'progressStep': 1, 'progressOrigMsg': '[1 of 2] Compiling Lib              ( /Users/tomv/Projects/Personal/haskell/helloworld/src/Lib.hs, interpreted )'}, 'tag': 'UpdateStatusProgress'}, 'tag': 'ResponseUpdateSession'}
 status_progress_2 = {'contents': {'contents': {'progressParsedMsg': 'Compiling Main', 'progressNumSteps': 2, 'progressStep': 2, 'progressOrigMsg': '[2 of 2] Compiling Main             ( /Users/tomv/Projects/Personal/haskell/helloworld/app/Main.hs, interpreted )'}, 'tag': 'UpdateStatusProgress'}, 'tag': 'ResponseUpdateSession'}
 status_progress_done = {'contents': {'contents': [], 'tag': 'UpdateStatusDone'}, 'tag': 'ResponseUpdateSession'}
-
 
 stackide.Log.verbosity = stackide.Log.VERB_ERROR
 cur_dir = os.path.dirname(os.path.realpath(__file__))
@@ -190,7 +188,7 @@ class SupervisorTests(unittest.TestCase):
         supervisor.check_instances()
         self.assertEqual(0, len(supervisor.window_instances))
         self.assertFalse(instance.is_alive)
-        backend.send_request.assert_called_with(stackide.StackIDE.Req.get_shutdown())
+        backend.send_request.assert_called_with(stackide.Requests.get_shutdown())
 
         supervisor.shutdown()
 
@@ -246,6 +244,26 @@ class LaunchTests(unittest.TestCase):
             mock_window([cur_dir + '/mocks/helloworld']))
         self.assertIsInstance(instance, stackide.StackIDE)
         instance.end()
+
+    @patch('stackide.boot_ide_backend', side_effect=FileNotFoundError())
+    def test_launch_window_stack_not_found(self, boot_mock):
+        cur_dir = os.path.dirname(os.path.realpath(__file__))
+        instance = stackide.configure_instance(
+            mock_window([cur_dir + '/mocks/helloworld']))
+        self.assertIsInstance(instance, stackide.NoStackIDE)
+        self.assertRegex(
+            instance.reason, "instance init failed -- stack not found")
+        self.assertRegex(sublime.current_error, "Could not find program 'stack'!")
+
+    @patch('stackide.boot_ide_backend', side_effect=Exception())
+    def test_launch_window_stack_not_found(self, boot_mock):
+        cur_dir = os.path.dirname(os.path.realpath(__file__))
+        # stackide.boot_ide_backend = Mock(side_effect=FileNotFoundError())
+        instance = stackide.configure_instance(
+            mock_window([cur_dir + '/mocks/helloworld']))
+        self.assertIsInstance(instance, stackide.NoStackIDE)
+        self.assertRegex(
+            instance.reason, "instance init failed -- unknown error")
 
 
 class FakeBackend():
@@ -303,7 +321,7 @@ class StackIDETests(unittest.TestCase):
         self.assertIsNotNone(instance)
         self.assertTrue(instance.is_active)
         self.assertTrue(instance.is_alive)
-        req = stackide.StackIDE.Req.get_source_errors()
+        req = stackide.Requests.get_source_errors()
         instance.send_request(req)
         backend.send_request.assert_called_with(req)
 
@@ -319,7 +337,7 @@ class StackIDETests(unittest.TestCase):
         self.assertFalse(instance.is_active)
         self.assertFalse(instance.is_alive)
         backend.send_request.assert_called_with(
-            stackide.StackIDE.Req.get_shutdown())
+            stackide.Requests.get_shutdown())
         # self.assertEqual(1, len(process.send_request.mock_calls))
 
 
@@ -494,8 +512,8 @@ class ListenerTests(unittest.TestCase):
 
         listener.on_post_save(view)
 
-        backend.send_request.assert_any_call(stackide.StackIDE.Req.update_session())
-        # backend.send_request.assert_called_with(stackide.StackIDE.Req.get_source_errors())
+        backend.send_request.assert_any_call(stackide.Requests.update_session())
+        # backend.send_request.assert_called_with(stackide.Requests.get_source_errors())
         stackide.supervisor = None
 
     def test_type_at_cursor_tests(self):
@@ -620,7 +638,7 @@ class AutocompleteTests(unittest.TestCase):
         view.settings().get = Mock(return_value=False)
         listener.on_query_completions(view, 'm', []) #locations not used.
 
-        req = stackide.StackIDE.Req.get_autocompletion(filepath=stackide.relative_view_file_name(view),prefix="m")
+        req = stackide.Requests.get_autocompletion(filepath=stackide.relative_view_file_name(view),prefix="m")
         req['seq'] = ANY
 
         backend.send_request.assert_called_with(req)
