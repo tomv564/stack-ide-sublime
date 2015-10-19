@@ -33,10 +33,9 @@ status_progress_1 = {'contents': {'contents': {'progressParsedMsg': 'Compiling L
 status_progress_2 = {'contents': {'contents': {'progressParsedMsg': 'Compiling Main', 'progressNumSteps': 2, 'progressStep': 2, 'progressOrigMsg': '[2 of 2] Compiling Main             ( /Users/tomv/Projects/Personal/haskell/helloworld/app/Main.hs, interpreted )'}, 'tag': 'UpdateStatusProgress'}, 'tag': 'ResponseUpdateSession'}
 status_progress_done = {'contents': {'contents': [], 'tag': 'UpdateStatusDone'}, 'tag': 'ResponseUpdateSession'}
 
-stackide.Log.verbosity = stackide.Log.VERB_ERROR
+stackide.Log = stackide.Logger(stackide.Logger.VERB_ERROR)
+stackide.settings = stackide.Settings("error", [], False)
 cur_dir = os.path.dirname(os.path.realpath(__file__))
-stackide.Settings.settings = {"add_to_PATH": []}
-
 
 def mock_window(paths):
     window = MagicMock()

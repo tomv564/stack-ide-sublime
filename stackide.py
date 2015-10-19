@@ -22,11 +22,14 @@ import glob
 # save the plugin to prevent proliferation of
 # stack-ide session.13953 folders
 
-watchdog = None
+settings = None
+Log = None
 supervisor = None
 
 def plugin_loaded():
-    global supervisor
+    global supervisor, logger, settings, Log
+    settings = load_settings()
+    Log = Logger(settings.verbosity)
     supervisor = Supervisor()
 
 def plugin_unloaded():
@@ -37,10 +40,8 @@ def plugin_unloaded():
 class Supervisor():
 
     def __init__(self, monitor=True):
-        self.settings = sublime.load_settings("SublimeStackIDE.sublime-settings")
-        verbosity = self.settings.get('verbosity', 'normal')
-        Log.set_verbosity(verbosity)
-        Log.normal("Starting Supervisor, verbosity=" + verbosity)
+
+        Log.info("Starting Supervisor")
         self.window_instances = {}
         self.monitor = monitor
         self.timer = None
@@ -52,7 +53,7 @@ class Supervisor():
           - new windows are assigned a process of stack-ide each
           - stale processes are stopped
 
-        NB. This is the only method that updates window_instance,
+        NB. This is the only method that updates window_instances,
         so as long as it is not called concurrently, there will be no
         race conditions...
         """
@@ -64,7 +65,7 @@ class Supervisor():
             if win_id not in current_windows:
                 # This is a window that is now closed, we may need to kill its process
                 if instance.is_active:
-                    Log.normal("Stopping stale process for window", win_id)
+                    Log.info("Stopping stale process for window", win_id)
                     instance.end()
             else:
                 # This window is still active. There are three possibilities:
@@ -103,7 +104,6 @@ class Supervisor():
         return instance
 
     def _end_instances(self):
-        # Log.normal("Killing all stack-ide-sublime instances:", {k:str(v) for k,v in StackIDE.ide_backend_instances.items()})
         for instance in self.window_instances.values():
             instance.end()
 
@@ -117,6 +117,40 @@ class Supervisor():
 # Utility functions
 #############################
 
+def load_settings():
+    settings_obj = sublime.load_settings("SublimeStackIDE.sublime-settings")
+    settings_obj.add_on_change("_on_new_settings", on_settings_changed)
+    add_to_path = settings_obj.get('add_to_PATH', [])
+    return Settings(
+        settings_obj.get('verbosity', 'info'),
+        add_to_path if isinstance(add_to_path, list) else [],
+        settings_obj.get('show_popup', False)
+    )
+
+def on_settings_changed():
+    global Log, settings, supervisor
+    updated_settings = load_settings()
+
+    if updated_settings.verbosity != settings.verbosity:
+        settings.verbosity = updated_settings.verbosity
+        Log.debug("Verbosity changed to {}, reloading logger".format(settings.verbosity))
+        Log = Logger(updated_settings.verbosity)
+
+    if updated_settings.add_to_PATH != settings.add_to_PATH:
+        settings.add_to_PATH = updated_settings.add_to_PATH
+        Log.debug("add_to_PATH changed to {}, reloading backends".format(settings.add_to_PATH))
+        supervisor.shutdown()
+        supervisor = Supervisor()
+
+    settings = updated_settings
+
+#       StackIDE.reset()
+#         # Whenever the add_to_PATH setting changes, it can be that a) instances
+#         # that failed to be initialized since 'stack' was not found, now have a
+#         # chance of being functional, or b) the user wants to use another version
+#         # of stack / stack-ide. In any case, we start again...
+
+
 def first_folder(window):
     """
     We only support running one stack-ide instance per window currently,
@@ -125,7 +159,7 @@ def first_folder(window):
     if len(window.folders()):
         return window.folders()[0]
     else:
-        Log.normal("Couldn't find a folder for stack-ide-sublime")
+        Log.info("Couldn't find a folder for stack-ide-sublime")
         return None
 
 def has_cabal_file(project_path):
@@ -198,17 +232,17 @@ def configure_instance(window):
 
     if not folder:
         msg = "No folder to monitor for window " + str(window.id())
-        Log.normal("Window {}: {}".format(str(window.id()), msg))
+        Log.info("Window {}: {}".format(str(window.id()), msg))
         instance = NoStackIDE(msg)
 
     elif not has_cabal_file(folder):
         msg = "No cabal file found in " + folder
-        Log.normal("Window {}: {}".format(str(window.id()), msg))
+        Log.info("Window {}: {}".format(str(window.id()), msg))
         instance = NoStackIDE(msg)
 
     elif not os.path.isfile(expected_cabalfile(folder)):
         msg = "Expected cabal file " + expected_cabalfile(folder) + " not found"
-        Log.normal("Window {}: {}".format(str(window.id()), msg))
+        Log.info("Window {}: {}".format(str(window.id()), msg))
         instance = NoStackIDE(msg)
 
     elif not is_stack_project(folder):
@@ -222,7 +256,7 @@ def configure_instance(window):
     else:
         try:
             # not clear how constructing an instance should throw a FileNotFoundError
-            Log.normal("Window {}: Launching stack ide at path {}".format(str(window.id()), folder))
+            Log.info("Window {}: Launching stack ide at path {}".format(str(window.id()), folder))
             instance = StackIDE(window)
         except FileNotFoundError as e:
             instance = NoStackIDE("instance init failed -- stack not found")
@@ -728,7 +762,7 @@ class JsonProcessBackend:
                 self._process = None
                 return
 
-        Log.normal("Stack-IDE stdout process ended.")
+        Log.info("Stack-IDE stdout process ended.")
 
 
 def boot_ide_backend(path, response_handler):
@@ -741,7 +775,7 @@ def boot_ide_backend(path, response_handler):
 
     # Extend the search path if indicated
     alt_env = os.environ.copy()
-    add_to_PATH = Settings.add_to_PATH()
+    add_to_PATH = settings.add_to_PATH
     if len(add_to_PATH) > 0:
         alt_env["PATH"] = os.pathsep.join(add_to_PATH + [alt_env.get("PATH","")])
 
@@ -851,7 +885,7 @@ class StackIDE:
         """
         Handles JSON responses from the backend
         """
-        Log.debug("Got response: ", data)
+        # Log.debug("Got response: ", data)
 
         tag = data.get("tag")
         contents = data.get("contents")
@@ -873,7 +907,7 @@ class StackIDE:
             Log.debug("Stack-ide process has shut down")
 
         else:
-            Log.normal("Unhandled response: ", data)
+            Log.info("Unhandled response: ", data)
 
     def _send_to_handler(self, seq_id, contents):
         handler = self.conts.get(seq_id)
@@ -946,7 +980,7 @@ class Win:
             view = self.window.active_view()
             (type, span) = types[0]
             if span:
-                if Settings.show_popup():
+                if settings.show_popup:
                     view.show_popup(type)
                 view.set_status("type_at_cursor", type)
                 view.add_regions("type_at_cursor", [view_region_from_span(view, span)], "storage.type", "", sublime.DRAW_OUTLINED)
@@ -1021,124 +1055,48 @@ class Win:
 
 class Settings:
 
-    # This is the sublime.Settings object associated to "SublimeStackIDE.sublime-settings".
-    # The Sublime API guarantees that no matter how many times we call sublime.load_settings(),
-    # we will always get the same object, so it is safe to save it (in particular, this means
-    # that if the user modifies the settings, they will be reflected on this object (one can
-    # then use settings.add_on_change() to register a callback, when a reaction is needed).
-    settings = None
+    def __init__(self, verbosity, add_to_PATH, show_popup):
+        self.verbosity = verbosity
+        self.add_to_PATH = add_to_PATH
+        self.show_popup = show_popup
 
-    @classmethod
-    def _get(cls,key,default):
-        cls.lazy_init()
-        return cls.settings.get(key,default)
+class Logger:
 
+    VERB_ERROR   = "ERROR"
+    VERB_WARNING = "WARNING"
+    VERB_INFO  = "INFO"
+    VERB_DEBUG   = "DEBUG"
+    VERBOSITIES = [VERB_ERROR, VERB_WARNING, VERB_INFO, VERB_DEBUG]
 
-    @classmethod
-    def lazy_init(cls):
-        if cls.settings is None:
-            cls.settings = sublime.load_settings("SublimeStackIDE.sublime-settings")
-            cls.settings.add_on_change("_on_new_settings",Settings._on_new_settings)
+    def __init__(self, verbosity):
+        try:
+            self.threshold = self.VERBOSITIES.index(verbosity.upper())
+        except ValueError:
+            print("SublimeStackIDE: Invalid verbosity:", verbosity)
+            self.threshold = 1
 
-    @staticmethod
-    def _on_new_settings():
-      Log.reset()
-      StackIDE.reset()
-        # Whenever the add_to_PATH setting changes, it can be that a) instances
-        # that failed to be initialized since 'stack' was not found, now have a
-        # chance of being functional, or b) the user wants to use another version
-        # of stack / stack-ide. In any case, we start again...
+    def error(self, *msg):
+        self._record(self.VERB_ERROR, *msg)
 
-    @classmethod
-    def reset(cls):
-      """
-      Removes settings listeners
-      """
-      if cls.settings:
-        cls.settings.clear_on_change("_on_new_settings")
-        cls.settings = None
+    def warning(self, *msg):
+        if self.threshold > 0:
+            self._record(self.VERB_WARNING, *msg)
 
-    @classmethod
-    def add_to_PATH(cls):
-        val = cls._get("add_to_PATH", [])
-        if not isinstance(val,list):
-            val = []
-        return val
+    def info(self, *msg):
+        if self.threshold > 1:
+            self._record(self.VERB_INFO, *msg)
 
-    @classmethod
-    def show_popup(cls):
-        val = cls._get("show_popup", False)
-        return val
+    def debug(self, *msg):
+        if self.threshold > 2:
+            self._record(self.VERB_DEBUG, *msg)
 
-    @classmethod
-    def verbosity(cls):
-        return cls._get("verbosity","warning")
+    def _record(self, verb, *msg):
 
-class Log:
-  """
-  Logging facilities
-  """
+        for line in ''.join(map(lambda x: str(x), msg)).split('\n'):
+            print('SublimeStackIDE [' + verb + ']:', line)
 
-  verbosity = None
+        if verb == self.VERB_ERROR:
+            sublime.status_message('There were errors, check the console log')
 
-  VERB_NONE    = 0
-  VERB_ERROR   = 1
-  VERB_WARNING = 2
-  VERB_NORMAL  = 3
-  VERB_DEBUG   = 4
-
-  @classmethod
-  def reset(cls):
-      Log.verbosity = None
-
-  @classmethod
-  def error(cls,*msg):
-      Log._record(Log.VERB_ERROR, *msg)
-
-  @classmethod
-  def warning(cls,*msg):
-      Log._record(Log.VERB_WARNING, *msg)
-
-  @classmethod
-  def normal(cls,*msg):
-      Log._record(Log.VERB_NORMAL, *msg)
-
-  @classmethod
-  def debug(cls,*msg):
-      Log._record(Log.VERB_DEBUG, *msg)
-
-  @classmethod
-  def _record(cls, verb, *msg):
-      if not Log.verbosity:
-          Log.set_verbosity("normal")
-
-      if verb <= Log.verbosity:
-          for line in ''.join(map(lambda x: str(x), msg)).split('\n'):
-              print('SublimeStackIDE ['+cls._show_verbosity(verb)+']:', line)
-
-          if verb == Log.VERB_ERROR:
-              sublime.status_message('There were errors, check the console log')
-          elif verb == Log.VERB_WARNING:
-              sublime.status_message('There were warnings, check the console log')
-
-
-  @classmethod
-  def set_verbosity(cls, verb):
-
-      if verb == "none":
-          Log.verbosity = Log.VERB_NONE
-      elif verb == "error":
-          Log.verbosity = Log.VERB_ERROR
-      elif verb == "warning":
-          Log.verbosity = Log.VERB_WARNING
-      elif verb == "normal":
-          Log.verbosity = Log.VERB_NORMAL
-      elif verb == "debug":
-          Log.verbosity = Log.VERB_DEBUG
-      else:
-          Log.verbosity = Log.VERB_WARNING
-          Log.warning("Invalid verbosity: '" + str(verb) + "'")
-
-  @classmethod
-  def _show_verbosity(cls,verb):
-      return ["?!","ERROR","WARN","NORM","DEBUG"][verb]
+        elif verb == self.VERB_WARNING:
+            sublime.status_message('There were warnings, check the console log')
