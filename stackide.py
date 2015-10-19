@@ -14,10 +14,6 @@ import json
 import uuid
 import glob
 
-# TODO: look at Tern_for_sublime's implementation.
-# Logging is a bit complicated for what it does
-# Is reloading logic needed (does the trigger even work?)
-# Keep commands / listener(s) short (seperate files?) and hook them up via functions.
 
 #############################
 # Plugin development utils
@@ -27,24 +23,31 @@ import glob
 # stack-ide session.13953 folders
 
 watchdog = None
+supervisor = None
 
 def plugin_loaded():
-    global watchdog
-    watchdog = StackIDEWatchdog()
+    global supervisor
+    supervisor = Supervisor()
 
 def plugin_unloaded():
-    global watchdog
-    watchdog.kill()
-    StackIDE.reset()
-    Log.reset()
-    Settings.reset()
-    watchdog = None
+    global supervisor
+    supervisor.shutdown()
+    supervisor = None
+    # global watchdog
+    # watchdog.kill()
+    # StackIDE.reset()
+    # Log.reset()
+    # Settings.reset()
+    # watchdog = None
 
 class Supervisor():
 
-    def __init__(self):
-        self.settings = sublime.load_settings()
+    def __init__(self, monitor=True):
+        self.settings = sublime.load_settings("SublimeStackIDE.sublime-settings")
+        Log.normal("Starting Supervisor")
         self.window_instances = {}
+        self.monitor = monitor
+        self.timer = None
         self.check_instances()
 
     def check_instances(self):
@@ -53,7 +56,7 @@ class Supervisor():
           - new windows are assigned a process of stack-ide each
           - stale processes are stopped
 
-        NB. This is the only method that updates ide_backend_instances,
+        NB. This is the only method that updates window_instance,
         so as long as it is not called concurrently, there will be no
         race conditions...
         """
@@ -61,7 +64,7 @@ class Supervisor():
         updated_instances = {}
 
         # Kill stale instances, keep live ones
-        for win_id, instance in StackIDE.ide_backend_instances.items():
+        for win_id, instance in self.window_instances.items():
             if win_id not in current_windows:
                 # This is a window that is now closed, we may need to kill its process
                 if instance.is_active:
@@ -81,30 +84,20 @@ class Supervisor():
 
         self.window_instances = updated_instances
 
-        # Thw windows remaining in current_windows are new, so they have no instance.
+        # The windows remaining in current_windows are new, so they have no instance.
         # We try to create one for them
         for window in current_windows.values():
             self.window_instances[window.id()] = launch_stack_ide(window)
 
+        # schedule next run.
+        if self.monitor:
+            self.timer = threading.Timer(1.0, self.check_instances)
+            self.timer.start()
 
-class StackIDEWatchdog():
-    """
-    Since I can't find any way to detect if a window closes,
-    we use a watchdog timer to clean up stack-ide instances
-    once we see that the window is no longer in existence.
-    """
-    def __init__(self):
-        super(StackIDEWatchdog, self).__init__()
-        Log.normal("Starting stack-ide-sublime watchdog")
-        self.check_for_processes()
-
-    def check_for_processes(self):
-        StackIDE.check_windows()
-        self.timer = threading.Timer(1.0, self.check_for_processes)
-        self.timer.start()
-
-    def kill(self):
-        self.timer.cancel()
+    def shutdown(self):
+        #todo: make sure processes are killed?
+        if self.timer:
+            self.timer.cancel()
 
 
 #############################
@@ -155,8 +148,6 @@ def send_request(window, request, on_response = None):
     """
     if StackIDE.is_running(window):
         StackIDE.for_window(window).send_request(request, on_response)
-    else:
-        raise Exception('no running instance for window ' + window.id())
 
 def get_view_selection(view):
     region = view.sel()[0]
@@ -352,6 +343,9 @@ class CopyHsTypeAtCursorCommand(sublime_plugin.TextCommand):
             sublime.set_clipboard(type)
 
 
+#############################################
+# PARSING
+#
 # see: https://github.com/commercialhaskell/stack-ide/blob/master/stack-ide-api/src/Stack/Ide/JsonAPI.hs
 # and: https://github.com/fpco/ide-backend/blob/master/ide-backend-common/IdeSession/Types/Public.hs
 # Types of responses:
@@ -379,54 +373,6 @@ def parse_source_errors(contents):
                         parse_either_span(item.get('errorSpan'))) for item in contents)
 
 
-class SourceError():
-
-    def __init__(self, kind, message, span):
-        self.kind = kind
-        self.msg = message
-        self.span = span
-
-    def __repr__(self):
-        return "{file}:{from_line}:{from_column}: {kind}:\n{msg}".format(
-            file=self.span.filePath,
-            from_line=self.span.fromLine,
-            from_column=self.span.fromColumn,
-            kind=self.kind,
-            msg=self.msg)
-
-
-def get_paths(paths, values):
-    """
-    Converts a list of keypaths into an array of values from a dict
-    """
-    return list(values.get(path) for path in paths)
-
-def parse_either_span(json):
-    """
-    Checks EitherSpan content and returns a SourceSpan if possible.
-    """
-    if json.get('tag') == 'ProperSpan':
-        return parse_source_span(json.get('contents'))
-    else:
-        return None
-
-def parse_source_span(json):
-    """
-    Converts json into a SourceSpan
-    """
-    paths = ['spanFilePath', 'spanFromLine', 'spanFromColumn', 'spanToLine', 'spanToColumn']
-    fields = get_paths(paths, json)
-    return SourceSpan(*fields) if fields else None
-
-class SourceSpan():
-
-    def __init__(self, filePath, fromLine, fromColumn, toLine, toColumn):
-        self.filePath = filePath
-        self.fromLine = fromLine
-        self.fromColumn = fromColumn
-        self.toLine = toLine
-        self.toColumn = toColumn
-
 def parse_exp_types(contents):
     """
     Converts ResponseGetExpTypes contents into an array of pairs containing
@@ -435,44 +381,6 @@ def parse_exp_types(contents):
     """
     return ((item[0], parse_source_span(item[1])) for item in contents)
 
-
-def parse_idprop(values):
-    """
-    Converts idProp content into an IdProp object.
-    """
-    return IdProp(values.get('idDefinedIn').get('moduleName'),
-                    values.get('idDefinedIn').get('modulePackage').get('packageName'),
-                    values.get('idType'),
-                    values.get('idName'),
-                    parse_either_span(values.get('idDefSpan')))
-
-def parse_idscope(values):
-    """
-    Converts idScope content into an IdScope object (containing only an IdImportedFrom)
-    """
-    importedFrom = values.get('idImportedFrom')
-    return IdScope(IdImportedFrom(importedFrom.get('moduleName'),
-                                  importedFrom.get('modulePackage').get('packageName'))) if importedFrom else None
-
-class IdScope():
-
-    def __init__(self, importedFrom):
-        self.importedFrom = importedFrom
-
-class IdImportedFrom():
-
-    def __init__(self, module, package):
-        self.module = module
-        self.package = package
-
-class IdProp():
-
-    def __init__(self, package, module, type, name, defSpan):
-        self.package = package
-        self.module = module
-        self.type = type
-        self.name = name
-        self.defSpan = defSpan
 
 def parse_span_info(json):
     """
@@ -494,7 +402,99 @@ def parse_span_info_response(contents):
     ResponseGetSpanInfo's contents are an array of SpanInfo and SourceSpan pairs
     """
     return ((parse_span_info(responseSpanInfo[0]),
-            parse_source_span(responseSpanInfo[1])) for responseSpanInfo in contents)
+             parse_source_span(responseSpanInfo[1])) for responseSpanInfo in contents)
+
+
+def parse_idprop(values):
+    """
+    Converts idProp content into an IdProp object.
+    """
+    return IdProp(values.get('idDefinedIn').get('moduleName'),
+                    values.get('idDefinedIn').get('modulePackage').get('packageName'),
+                    values.get('idType'),
+                    values.get('idName'),
+                    parse_either_span(values.get('idDefSpan')))
+
+
+def parse_idscope(values):
+    """
+    Converts idScope content into an IdScope object (containing only an IdImportedFrom)
+    """
+    importedFrom = values.get('idImportedFrom')
+    return IdScope(IdImportedFrom(importedFrom.get('moduleName'),
+                                  importedFrom.get('modulePackage').get('packageName'))) if importedFrom else None
+
+
+def parse_either_span(json):
+    """
+    Checks EitherSpan content and returns a SourceSpan if possible.
+    """
+    if json.get('tag') == 'ProperSpan':
+        return parse_source_span(json.get('contents'))
+    else:
+        return None
+
+def parse_source_span(json):
+    """
+    Converts json into a SourceSpan
+    """
+    paths = ['spanFilePath', 'spanFromLine', 'spanFromColumn', 'spanToLine', 'spanToColumn']
+    fields = get_paths(paths, json)
+    return SourceSpan(*fields) if fields else None
+
+
+def get_paths(paths, values):
+    """
+    Converts a list of keypaths into an array of values from a dict
+    """
+    return list(values.get(path) for path in paths)
+
+
+class SourceError():
+
+    def __init__(self, kind, message, span):
+        self.kind = kind
+        self.msg = message
+        self.span = span
+
+    def __repr__(self):
+        return "{file}:{from_line}:{from_column}: {kind}:\n{msg}".format(
+            file=self.span.filePath,
+            from_line=self.span.fromLine,
+            from_column=self.span.fromColumn,
+            kind=self.kind,
+            msg=self.msg)
+
+
+class SourceSpan():
+
+    def __init__(self, filePath, fromLine, fromColumn, toLine, toColumn):
+        self.filePath = filePath
+        self.fromLine = fromLine
+        self.fromColumn = fromColumn
+        self.toLine = toLine
+        self.toColumn = toColumn
+
+
+class IdScope():
+
+    def __init__(self, importedFrom):
+        self.importedFrom = importedFrom
+
+class IdImportedFrom():
+
+    def __init__(self, module, package):
+        self.module = module
+        self.package = package
+
+class IdProp():
+
+    def __init__(self, package, module, type, name, defSpan):
+        self.package = package
+        self.module = module
+        self.type = type
+        self.name = name
+        self.defSpan = defSpan
 
 
 #############################
@@ -543,20 +543,6 @@ class StackIDETypeAtCursorHandler(sublime_plugin.EventListener):
             request = StackIDE.Req.get_exp_types(span_from_view_selection(view))
             send_request(window, request, Win(window).highlight_type)
 
-def get_keypath(a_dict, keypath):
-    """
-    Extracts a keypath from a nested dictionary, e.g.
-    >>> get_keypath({"hey":{"there":"kid"}}, ["hey", "there"])
-    'kid'
-    Returns None if the keypath doesn't exist.
-    """
-    value = a_dict
-    path = keypath
-    while value and path:
-        if not type(value) is dict: return None
-        value = value.get(path[0])
-        path = path[1:]
-    return value
 
 class StackIDEAutocompleteHandler(sublime_plugin.EventListener):
     """
@@ -778,46 +764,6 @@ class StackIDE:
             return { "tag": "RequestShutdownSession", "contents":[]}
 
     @classmethod
-    def check_windows(cls):
-        """
-        Compares the current windows with the list of instances:
-          - new windows are assigned a process of stack-ide each
-          - stale processes are stopped
-
-        NB. This is the only method that updates ide_backend_instances,
-        so as long as it is not called concurrently, there will be no
-        race conditions...
-        """
-        current_windows = {w.id(): w for w in sublime.windows()}
-        updated_instances = {}
-
-        # Kill stale instances, keep live ones
-        for win_id,instance in StackIDE.ide_backend_instances.items():
-            if win_id not in current_windows:
-                # This is a window that is now closed, we may need to kill its process
-                if instance.is_active:
-                    Log.normal("Stopping stale process for window", win_id)
-                    instance.end()
-            else:
-                # This window is still active. There are three possibilities:
-                #  1) it has an alive and active instance.
-                #  2) it has an alive but inactive instance (one that failed to init, etc)
-                #  3) it has a dead instance, i.e., one that was killed.
-                #
-                # A window with a dead instances is treated like a new one, so we will
-                # try to launch a new instance for it
-                if instance.is_alive:
-                    del current_windows[win_id]
-                    updated_instances[win_id] = instance
-
-        StackIDE.ide_backend_instances = updated_instances
-
-        # Thw windows remaining in current_windows are new, so they have no instance.
-        # We try to create one for them
-        for window in current_windows.values():
-            StackIDE.ide_backend_instances[window.id()] = launch_stack_ide(window)
-
-    @classmethod
     def is_running(cls, window):
         if not window:
             return False
@@ -907,7 +853,7 @@ class StackIDE:
         """
         Handles JSON responses from the backend
         """
-        Log.debug("Got response: ", data)
+        # Log.debug("Got response: ", data)
 
         response = data.get("tag")
         contents = data.get("contents")
@@ -1007,39 +953,43 @@ class Win:
         full_path = os.path.join(first_folder(self.window), file_path)
         return self.window.find_open_file(full_path)
 
+    def reset_error_panel(self):
+        """
+        Creates and configures the error panel for the current window
+        """
+        panel = self.window.create_output_panel("hide_errors")
+        panel.set_read_only(False)
+
+        # This turns on double-clickable error/warning messages in the error panel
+        # using a regex that looks for the form file_name:line:column
+        panel.settings().set("result_file_regex", "^(..[^:]*):([0-9]+):?([0-9]+)?:? (.*)$")
+
+        # Seems to force the panel to refresh after we clear it:
+        self.window.run_command("hide_panel", {"panel": "output.hide_errors"})
+
+        # Clear the panel
+        panel.run_command("clear_error_panel")
+
+        return panel
+
+
     def highlight_errors(self, source_errors):
         """
         Places errors in the error panel, and highlights the relevant regions for each error.
         """
 
-        # todo: extract and refactor panel management code
-        error_panel = self.window.create_output_panel("hide_errors")
-        error_panel.set_read_only(False)
-
-        # This turns on double-clickable error/warning messages in the error panel
-        # using a regex that looks for the form file_name:line:column
-        error_panel.settings().set("result_file_regex","^(..[^:]*):([0-9]+):?([0-9]+)?:? (.*)$")
-
-        # Seems to force the panel to refresh after we clear it:
-        self.window.run_command("hide_panel", {"panel":"output.hide_errors"})
-        # Clear the panel
-        error_panel.run_command("clear_error_panel")
-
         errors = list(parse_source_errors(source_errors))
 
-        # OLD: Text commands only accept Value types, so we perform the conversion of the error span to a string here
-        # to pass to update_error_panel.
         # TODO we should pass the errorKind too if the error has no span
-        # message = span.as_error_message(error) if span else error.get("errorMsg")
-        # NEW: Add the error to the error panel (uses __repr__)
+        # TODO check if errors without span occur and work?
+        error_panel = self.reset_error_panel()
         for error in errors:
             error_panel.run_command("update_error_panel", {"message": repr(error)})
 
-        error_regions_by_view_id = {}
-        warning_regions_by_view_id = {}
-
         # We gather each error by the file view it should annotate
         # so we can add regions in bulk to each view.
+        error_regions_by_view_id = {}
+        warning_regions_by_view_id = {}
         for path, errors in groupby(errors, lambda error: error.span.filePath):
             view = self.find_view_for_path(path)
             for kind, errors in groupby(errors, lambda error: error.kind):
@@ -1054,10 +1004,8 @@ class Win:
             view.add_regions("warnings", warning_regions_by_view_id.get(view.id(), []), "comment", "dot", sublime.DRAW_OUTLINED)
 
         if errors:
-            # Show the panel
             self.window.run_command("show_panel", {"panel":"output.hide_errors"})
         else:
-            # Hide the panel
             self.window.run_command("hide_panel", {"panel":"output.hide_errors"})
 
         error_panel.set_read_only(True)

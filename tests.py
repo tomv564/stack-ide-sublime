@@ -4,28 +4,18 @@ from unittest.mock import MagicMock, Mock, ANY
 import stackide
 from mocks import sublime
 
-# on os-x:
+# SETUP:
+# create a virtualenv for python 3.
 # sudo pip install magicmock==1.0.1
 
-# Untested
-
-# Watchdog hooks.
-# plugin_loaded
-# plugin_unloaded
-
-# start up is deferred to static methods on StackIDE
-# .. why not just put that functionality in the Watchdog itself
-# and leave the StackIDE instances to manage single processes?
-# TODO: move check_windows to Watchdog class.
-
-# StackIDE lifecycle:
-#
-
-# Issues ran into:
-# Cannot detect if the first request is made
-# Calls to settings everywhere, can this not be loaded in the watchdog and
-# be passed in to all instances? We can then avoid using the static log methods
-# everywhere too.
+# TODO:
+# Clean up static methods on StackIDE and rename to something appropriate (dispatcher?)
+# Determine if Settings and Log can be injected/configured from Supervisor
+# PEP8 tests and split out files.
+# Look at Tern_for_sublime's implementation.
+# Logging is a bit complicated for what it does
+# Is reloading logic needed (does the trigger even work?)
+# Make commands / listener(s) short - use shared functionality
 
 # TEST DATA
 
@@ -116,30 +106,97 @@ class ParsingTests(unittest.TestCase):
 
 class SupervisorTests(unittest.TestCase):
 
+    def test_created_on_plugin_loaded(self):
+        self.assertIsNone(stackide.supervisor)
+        stackide.plugin_loaded()
+        self.assertIsNotNone(stackide.supervisor)
+        stackide.supervisor.shutdown()
+
+    def test_destroyed_on_plugin_unloaded(self):
+        stackide.plugin_loaded()
+        self.assertIsNotNone(stackide.supervisor)
+        stackide.plugin_unloaded()
+        self.assertIsNone(stackide.supervisor)
+
     def test_can_create(self):
-        supervisor = stackide.Supervisor()
+        supervisor = stackide.Supervisor(monitor=False)
         self.assertIsNotNone(supervisor)
         self.assertEqual(0, len(supervisor.window_instances))
+        supervisor.shutdown()
 
     def test_creates_initial_window(self):
         sublime.create_window('.')
-        supervisor = stackide.Supervisor()
+        supervisor = stackide.Supervisor(monitor=False)
         self.assertEqual(1, len(supervisor.window_instances))
+        sublime.destroy_windows()
+        supervisor.shutdown()
 
     def test_monitors_closed_windows(self):
-        supervisor = stackide.Supervisor()
-        # uses state from prev. test.
+        sublime.create_window('.')
+        supervisor = stackide.Supervisor(monitor=False)
         self.assertEqual(1, len(supervisor.window_instances))
         sublime.destroy_windows()
         supervisor.check_instances()
         self.assertEqual(0, len(supervisor.window_instances))
+        supervisor.shutdown()
 
     def test_monitors_new_windows(self):
-        supervisor = stackide.Supervisor()
+        supervisor = stackide.Supervisor(monitor=False)
         self.assertEqual(0, len(supervisor.window_instances))
         sublime.create_window('.')
         supervisor.check_instances()
         self.assertEqual(1, len(supervisor.window_instances))
+        supervisor.shutdown()
+        sublime.destroy_windows()
+
+    def test_retains_live_instances(self):
+        window = sublime.create_window('.')
+        supervisor = stackide.Supervisor(monitor=False)
+        self.assertEqual(1, len(supervisor.window_instances))
+
+        # substitute a 'live' instance
+        instance = stackide.StackIDE(window, FakeBackend())
+        supervisor.window_instances[window.id()] = instance
+
+        # instance should still exist.
+        supervisor.check_instances()
+        self.assertEqual(1, len(supervisor.window_instances))
+        self.assertEqual(instance, supervisor.window_instances[window.id()])
+
+        supervisor.shutdown()
+        sublime.destroy_windows()
+
+    def test_kills_live_orphans(self):
+        window = sublime.create_window('.')
+        supervisor = stackide.Supervisor(monitor=False)
+        self.assertEqual(1, len(supervisor.window_instances))
+
+        # substitute a 'live' instance
+        backend = MagicMock()
+        instance = stackide.StackIDE(window, backend)
+        supervisor.window_instances[window.id()] = instance
+
+        # close the window
+        sublime.destroy_windows()
+
+        # instance should be killed
+        supervisor.check_instances()
+        self.assertEqual(0, len(supervisor.window_instances))
+        self.assertFalse(instance.is_alive)
+        backend.send_request.assert_called_with(stackide.StackIDE.Req.get_shutdown())
+
+        supervisor.shutdown()
+
+    def test_retains_existing_instances(self):
+        supervisor = stackide.Supervisor(monitor=False)
+        self.assertEqual(0, len(supervisor.window_instances))
+        sublime.create_window('.')
+        supervisor.check_instances()
+        self.assertEqual(1, len(supervisor.window_instances))
+        supervisor.check_instances()
+        self.assertEqual(1, len(supervisor.window_instances))
+        supervisor.shutdown()
+        sublime.destroy_windows()
 
 
 class LaunchTests(unittest.TestCase):
@@ -175,17 +232,18 @@ class LaunchTests(unittest.TestCase):
         self.assertRegex(
             instance.reason, "cabalfile_wrong_project.cabal not found.*")
 
-    @unittest.skip("this hangs once stack ide is launched")
+    # slow!
     def test_launch_window_with_helloworld_project(self):
         cur_dir = os.path.dirname(os.path.realpath(__file__))
         instance = stackide.launch_stack_ide(
             mock_window([cur_dir + '/mocks/helloworld']))
         self.assertIsInstance(instance, stackide.StackIDE)
+        instance.end()
 
 
 class FakeBackend():
 
-    def __init__(self, response=None):
+    def __init__(self, response={}):
         self.response = response
         self.handler = None
 

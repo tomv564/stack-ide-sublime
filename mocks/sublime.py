@@ -46,7 +46,9 @@ clipboard = None
 
 def create_window(path):
     global fake_windows
-    fake_windows.append(FakeWindow(path))
+    window = FakeWindow(path)
+    fake_windows.append(window)
+    return window
 
 def destroy_windows():
     global fake_windows
