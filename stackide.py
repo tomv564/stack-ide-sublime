@@ -383,7 +383,9 @@ def parse_update_session(contents):
         progress = contents.get('contents')
         return str(progress.get("progressParsedMsg"))
     elif tag == "UpdateStatusDone":
-        return "Done."
+        return "Session started."
+    elif tag == "UpdateStatusRequiredRestart":
+        return "Restarting session..."
 
 def parse_source_errors(contents):
     """
@@ -849,7 +851,7 @@ class StackIDE:
         """
         Handles JSON responses from the backend
         """
-        #Log.debug("Got response: ", data)
+        Log.debug("Got response: ", data)
 
         tag = data.get("tag")
         contents = data.get("contents")

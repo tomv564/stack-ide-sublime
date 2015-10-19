@@ -1,8 +1,12 @@
 import unittest
 import os
 from unittest.mock import MagicMock, Mock, ANY, patch
-from . import stackide
-from .mocks import sublime
+try:
+  from . import stackide
+  from .mocks import sublime
+except SystemError:
+  import stackide
+  from mocks import sublime
 
 # SETUP:
 # create a virtualenv for python 3.
@@ -24,6 +28,7 @@ many_completions = {'tag': 'ResponseGetAutocompletion', 'contents': [{'idProp': 
 someFunc_span_info = {'contents': [[{'contents': {'idProp': {'idDefinedIn': {'moduleName': 'Lib', 'modulePackage': {'packageVersion': None, 'packageName': 'main', 'packageKey': 'main'}}, 'idSpace': 'VarName', 'idType': 'IO ()', 'idDefSpan': {'contents': {'spanFromLine': 9, 'spanFromColumn': 1, 'spanToColumn': 9, 'spanFilePath': 'src/Lib.hs', 'spanToLine': 9}, 'tag': 'ProperSpan'}, 'idName': 'someFunc', 'idHomeModule': None}, 'idScope': {'idImportQual': '', 'idImportedFrom': {'moduleName': 'Lib', 'modulePackage': {'packageVersion': None, 'packageName': 'main', 'packageKey': 'main'}}, 'idImportSpan': {'contents': {'spanFromLine': 3, 'spanFromColumn': 1, 'spanToColumn': 11, 'spanFilePath': 'app/Main.hs', 'spanToLine': 3}, 'tag': 'ProperSpan'}, 'tag': 'Imported'}}, 'tag': 'SpanId'}, {'spanFromLine': 7, 'spanFromColumn': 27, 'spanToColumn': 35, 'spanFilePath': 'app/Main.hs', 'spanToLine': 7}]], 'seq': '724752c9-a7bf-4658-834a-3ff7df64e7e5', 'tag': 'ResponseGetSpanInfo'}
 putStrLn_span_info = {'contents': [[{'contents': {'idProp': {'idDefinedIn': {'moduleName': 'System.IO', 'modulePackage': {'packageVersion': '4.8.1.0', 'packageName': 'base', 'packageKey': 'base'}}, 'idSpace': 'VarName', 'idType': 'String -> IO ()', 'idDefSpan': {'contents': '<no location info>', 'tag': 'TextSpan'}, 'idName': 'putStrLn', 'idHomeModule': {'moduleName': 'System.IO', 'modulePackage': {'packageVersion': '4.8.1.0', 'packageName': 'base', 'packageKey': 'base'}}}, 'idScope': {'idImportQual': '', 'idImportedFrom': {'moduleName': 'Prelude', 'modulePackage': {'packageVersion': '4.8.1.0', 'packageName': 'base', 'packageKey': 'base'}}, 'idImportSpan': {'contents': {'spanFromLine': 1, 'spanFromColumn': 8, 'spanToColumn': 12, 'spanFilePath': 'app/Main.hs', 'spanToLine': 1}, 'tag': 'ProperSpan'}, 'tag': 'Imported'}}, 'tag': 'SpanId'}, {'spanFromLine': 7, 'spanFromColumn': 41, 'spanToColumn': 49, 'spanFilePath': 'app/Main.hs', 'spanToLine': 7}]], 'seq': '6ee8d949-82bd-491d-8b79-ffcaa3e65fde', 'tag': 'ResponseGetSpanInfo'}
 readFile_exp_types = {'tag': 'ResponseGetExpTypes', 'contents': [['FilePath -> IO String', {'spanToColumn': 25, 'spanToLine': 10, 'spanFromColumn': 17, 'spanFromLine': 10, 'spanFilePath': 'src/Lib.hs'}], ['IO String', {'spanToColumn': 36, 'spanToLine': 10, 'spanFromColumn': 17, 'spanFromLine': 10, 'spanFilePath': 'src/Lib.hs'}], ['IO ()', {'spanToColumn': 28, 'spanToLine': 11, 'spanFromColumn': 12, 'spanFromLine': 9, 'spanFilePath': 'src/Lib.hs'}]], 'seq': 'fd3eb2a5-e390-4ad7-be72-8b2e82441a95'}
+status_progress_restart = {'contents': {'contents': [], 'tag': 'UpdateStatusRequiredRestart'}, 'tag': 'ResponseUpdateSession'}
 status_progress_1 = {'contents': {'contents': {'progressParsedMsg': 'Compiling Lib', 'progressNumSteps': 2, 'progressStep': 1, 'progressOrigMsg': '[1 of 2] Compiling Lib              ( /Users/tomv/Projects/Personal/haskell/helloworld/src/Lib.hs, interpreted )'}, 'tag': 'UpdateStatusProgress'}, 'tag': 'ResponseUpdateSession'}
 status_progress_2 = {'contents': {'contents': {'progressParsedMsg': 'Compiling Main', 'progressNumSteps': 2, 'progressStep': 2, 'progressOrigMsg': '[2 of 2] Compiling Main             ( /Users/tomv/Projects/Personal/haskell/helloworld/app/Main.hs, interpreted )'}, 'tag': 'UpdateStatusProgress'}, 'tag': 'ResponseUpdateSession'}
 status_progress_done = {'contents': {'contents': [], 'tag': 'UpdateStatusDone'}, 'tag': 'ResponseUpdateSession'}
@@ -105,9 +110,11 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual('Data.List', scope.importedFrom.module)
 
     def test_parse_update_session(self):
+
+        self.assertEqual('Restarting session...', stackide.parse_update_session(status_progress_restart.get('contents')))
         self.assertEqual('Compiling Lib', stackide.parse_update_session(status_progress_1.get('contents')))
         self.assertEqual('Compiling Main', stackide.parse_update_session(status_progress_2.get('contents')))
-        self.assertEqual('Done.', stackide.parse_update_session(status_progress_done.get('contents')))
+        self.assertEqual('Session started.', stackide.parse_update_session(status_progress_done.get('contents')))
 
 class SupervisorTests(unittest.TestCase):
 
