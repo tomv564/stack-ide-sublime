@@ -49,6 +49,7 @@ def mock_view():
     view = MagicMock()
     view.file_path = Mock(return_value=cur_dir + '/mocks/helloworld/Setup.hs')
     view.file_name = Mock(return_value="Setup.hs")
+    view.match_selector = Mock(return_value=True)
     window = mock_window([cur_dir + '/mocks/helloworld'])
     window.active_view = Mock(return_value=view)
     window.find_open_file = Mock(return_value=view)
@@ -361,6 +362,10 @@ class UtilTests(unittest.TestCase):
         view.file_name.return_value = cur_dir + '/mocks/helloworld/Setup.hs'
         self.assertEqual('Setup.hs', stackide.relative_view_file_name(view))
 
+    def test_is_haskell_view(self):
+        view = mock_view()
+        self.assertTrue(stackide.is_haskell_view(view))
+
     def test_complaints_not_repeated(self):
         stackide.complain('complaint', 'waaaah')
         self.assertEqual(sublime.current_error, 'waaaah')
@@ -519,6 +524,24 @@ class ListenerTests(unittest.TestCase):
         listener.on_post_save(view)
 
         backend.send_request.assert_any_call(stackide.Requests.update_session())
+        # backend.send_request.assert_called_with(stackide.Requests.get_source_errors())
+        stackide.supervisor = None
+
+    def test_ignores_non_haskell_views(self):
+        listener = stackide.StackIDESaveListener()
+        view = mock_view()
+        view.match_selector.return_value = False
+        backend = MagicMock()
+        window = view.window()
+        instance = stackide.StackIDE(window, backend)
+        stackide.supervisor = stackide.Supervisor(monitor=False)
+        stackide.supervisor.window_instances[
+            view.window().id()] = instance
+        backend.send_request = Mock()
+
+        listener.on_post_save(view)
+
+        self.assertFalse(backend.send_request.called) # assert(stackide.Requests.update_session())
         # backend.send_request.assert_called_with(stackide.Requests.get_source_errors())
         stackide.supervisor = None
 

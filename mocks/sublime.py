@@ -18,7 +18,15 @@ def set_timeout(fn, delay):
     fn()
 
 def load_settings(name):
-    return {}
+    return Settings()
+
+class Settings():
+
+    def add_on_change(self, key, func):
+        pass
+
+    def get(self, key, default):
+        return default
 
 
 # class FakeBackend():

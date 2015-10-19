@@ -196,6 +196,9 @@ def send_request(window, request, on_response = None):
     if supervisor.is_running(window):
         supervisor.for_window(window).send_request(request, on_response)
 
+def is_haskell_view(view):
+    return view.match_selector(view.sel()[0].begin(), "source.haskell")
+
 def get_view_selection(view):
     region = view.sel()[0]
     return (view.rowcol(region.begin()), view.rowcol(region.end()))
@@ -564,7 +567,12 @@ class StackIDESaveListener(sublime_plugin.EventListener):
     then request a report of source errors.
     """
     def on_post_save(self, view):
+
+        if not is_haskell_view(view):
+            return
+
         window = view.window()
+
         if not supervisor.is_running(window):
             return
 
@@ -589,6 +597,10 @@ class StackIDETypeAtCursorHandler(sublime_plugin.EventListener):
     def on_selection_modified(self, view):
         if not view:
             return
+
+        if not is_haskell_view(view):
+            return
+
         window = view.window()
         if not supervisor.is_running(window):
             return
@@ -612,6 +624,9 @@ class StackIDEAutocompleteHandler(sublime_plugin.EventListener):
         self.refreshing = False
 
     def on_query_completions(self, view, prefix, locations):
+
+        if not is_haskell_view(view):
+            return
 
         window = view.window()
         if not supervisor.is_running(window):
